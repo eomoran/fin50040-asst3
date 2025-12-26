@@ -73,15 +73,37 @@ def plot_efficient_frontier(portfolio_type="size", start_year=1927, end_year=201
     mu, Sigma, portfolio_names = compute_moments(returns)
     
     # Construct frontier
-    frontier = construct_mv_frontier(mu, Sigma)
+    frontier = construct_mv_frontier(mu, Sigma, num_portfolios=150)  # More points for smoother curve
+    
+    # Sort frontier by volatility for proper plotting (U-shape)
+    sort_idx = np.argsort(frontier['volatilities'])
+    frontier['volatilities'] = frontier['volatilities'][sort_idx]
+    frontier['returns'] = frontier['returns'][sort_idx]
+    
+    # Find minimum variance portfolio explicitly
+    n = len(mu)
+    ones = np.ones(n)
+    try:
+        inv_Sigma = np.linalg.inv(Sigma)
+    except np.linalg.LinAlgError:
+        inv_Sigma = np.linalg.pinv(Sigma)
+    w_mvp = inv_Sigma @ ones / (ones.T @ inv_Sigma @ ones)
+    mvp_return = mu.T @ w_mvp
+    mvp_vol = np.sqrt(w_mvp.T @ Sigma @ w_mvp)
     
     # Find key portfolios
     w_msmp, msmp_return, msmp_vol = find_msmp(mu, Sigma)
     w_opt, opt_return, opt_vol = find_optimal_crra_portfolio(mu, Sigma, rra=4)
     w_z, z_return, z_vol = find_zero_beta_portfolio(mu, Sigma, w_opt)
     
+    # Verify zero-beta constraint
+    zero_beta_check = abs(w_z.T @ Sigma @ w_opt)
+    if zero_beta_check > 1e-4:
+        print(f"  Warning: Zero-beta constraint check: {zero_beta_check:.2e} (should be ~0)")
+    
     # Convert gross returns to net returns for display
     frontier_returns_net = frontier['returns'] - 1
+    mvp_return_net = mvp_return - 1
     msmp_return_net = msmp_return - 1
     opt_return_net = opt_return - 1
     z_return_net = z_return - 1
@@ -96,7 +118,12 @@ def plot_efficient_frontier(portfolio_type="size", start_year=1927, end_year=201
     
     # Plot efficient frontier
     ax.plot(frontier['volatilities'], frontier_returns_net, 
-            'b-', linewidth=2, label='Efficient Frontier', alpha=0.7)
+            'b-', linewidth=2, label='Efficient Frontier', alpha=0.7, zorder=2)
+    
+    # Plot minimum variance portfolio
+    ax.scatter([mvp_vol], [mvp_return_net], 
+              c='purple', s=150, marker='o', edgecolors='black', linewidths=1.5,
+              label=f'MVP (R={mvp_return_net:.2%}, σ={mvp_vol:.2%})', zorder=4)
     
     # Plot individual assets (if requested)
     if show_individual_assets:
@@ -139,6 +166,24 @@ def plot_efficient_frontier(portfolio_type="size", start_year=1927, end_year=201
     # Format axes as percentages
     ax.xaxis.set_major_formatter(plt.FuncFormatter(lambda x, p: f'{x:.1%}'))
     ax.yaxis.set_major_formatter(plt.FuncFormatter(lambda x, p: f'{x:.1%}'))
+    
+    # Set axis limits to show full frontier with some padding
+    # X-axis: from slightly below MVP vol to slightly above max vol
+    x_min = min(frontier['volatilities'].min(), mvp_vol) * 0.95
+    x_max = max(frontier['volatilities'].max(), 
+                msmp_vol if not np.isnan(msmp_vol) else 0,
+                opt_vol if not np.isnan(opt_vol) else 0,
+                z_vol if not np.isnan(z_vol) else 0) * 1.05
+    ax.set_xlim(x_min, x_max)
+    
+    # Y-axis: from slightly below min return to slightly above max return
+    y_min = min(frontier_returns_net.min(), 
+                mvp_return_net,
+                msmp_return_net if not np.isnan(msmp_return_net) else 0,
+                z_return_net if not np.isnan(z_return_net) else 0) * 1.1  # Extra padding for negative returns
+    y_max = max(frontier_returns_net.max(), 
+                opt_return_net if not np.isnan(opt_return_net) else 0) * 1.05
+    ax.set_ylim(y_min, y_max)
     
     plt.tight_layout()
     
