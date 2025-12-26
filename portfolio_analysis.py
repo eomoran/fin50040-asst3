@@ -627,6 +627,61 @@ def find_zero_beta_portfolio(mu, Sigma, w_m, on_frontier=True):
             w_z = best_w
             z_return = best_return
             z_vol = best_vol
+            
+            # Verify that ZBP is actually on the investment opportunity set
+            # by checking if it's the minimum variance portfolio for its return level
+            # (i.e., no other portfolio with same return has lower variance)
+            def verify_on_frontier(w, target_return):
+                """Check if w is the minimum variance portfolio for its return level"""
+                def objective(w_test):
+                    return w_test.T @ Sigma @ w_test
+                
+                constraints = [
+                    {'type': 'eq', 'fun': lambda w_test: np.sum(w_test) - 1},
+                    {'type': 'eq', 'fun': lambda w_test: mu.T @ w_test - target_return}
+                ]
+                bounds = [(-1, 1) for _ in range(n)]
+                
+                # Try to find minimum variance portfolio for this return
+                result = minimize(objective, w.copy(), method='SLSQP',
+                                 bounds=bounds, constraints=constraints,
+                                 options={'maxiter': 1000, 'ftol': 1e-9})
+                
+                if result.success:
+                    # Check if the found portfolio has lower variance
+                    variance_found = result.fun
+                    variance_current = w.T @ Sigma @ w
+                    # Allow small tolerance for numerical errors
+                    return abs(variance_found - variance_current) < 1e-6
+                return False
+            
+            # If not on frontier, try to project it onto the frontier
+            if not verify_on_frontier(w_z, z_return):
+                # Re-optimize to ensure it's on the frontier
+                def objective(w):
+                    return w.T @ Sigma @ w
+                
+                constraints = [
+                    {'type': 'eq', 'fun': lambda w: np.sum(w) - 1},
+                    {'type': 'eq', 'fun': lambda w: mu.T @ w - z_return},
+                    {'type': 'eq', 'fun': lambda w: w.T @ Sigma @ w_m}
+                ]
+                bounds = [(-1, 1) for _ in range(n)]
+                
+                # Try with the current solution as initial guess
+                result = minimize(objective, w_z.copy(), method='SLSQP',
+                                 bounds=bounds, constraints=constraints,
+                                 options={'maxiter': 2000, 'ftol': 1e-9})
+                
+                if result.success:
+                    budget_check = abs(np.sum(result.x) - 1)
+                    return_check = abs(mu.T @ result.x - z_return)
+                    cov_check = abs(result.x.T @ Sigma @ w_m)
+                    
+                    if budget_check < 1e-5 and return_check < 1e-5 and cov_check < 1e-3:
+                        w_z = result.x
+                        z_vol = np.sqrt(w_z.T @ Sigma @ w_z)
+            
             zero_beta_check = abs(w_z.T @ Sigma @ w_m)
             if zero_beta_check > 1e-4:
                 print(f"        Warning: Zero-beta constraint not perfectly satisfied (error: {zero_beta_check:.2e})")
