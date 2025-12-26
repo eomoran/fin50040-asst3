@@ -444,10 +444,9 @@ def estimate_jensens_alpha(returns, factors, rf, use_zero_beta=False, w_z=None):
         if use_zero_beta and w_z is not None:
             # Zero-β CAPM: r_i - r_z = α_i + β_i(r_m - r_z)
             # Compute zero-β portfolio return
-            z_return = (returns_aligned @ w_z)
-            if isinstance(z_return, pd.DataFrame):
-                z_return = z_return.iloc[:, 0]
-            z_return_aligned = z_return.loc[common_dates] if hasattr(z_return, 'loc') else z_return
+            # w_z should be aligned with returns_aligned.columns
+            z_return = (returns_aligned * w_z).sum(axis=1)
+            z_return_aligned = z_return.loc[common_dates]
             market_excess = portfolio_excess - (z_return_aligned - rf_aligned)
             
             # Regression: r_i - r_z = α_i + β_i(r_m - r_z)
