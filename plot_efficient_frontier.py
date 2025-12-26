@@ -116,9 +116,9 @@ def plot_efficient_frontier(portfolio_type="size", start_year=1927, end_year=201
     # Create figure
     fig, ax = plt.subplots(figsize=figsize)
     
-    # Plot efficient frontier
+    # Plot investment opportunity set (both efficient and inefficient limbs)
     ax.plot(frontier['volatilities'], frontier_returns_net, 
-            'b-', linewidth=2, label='Efficient Frontier', alpha=0.7, zorder=2)
+            'b-', linewidth=2, label='Investment Opportunity Set', alpha=0.7, zorder=2)
     
     # Plot minimum variance portfolio
     ax.scatter([mvp_vol], [mvp_return_net], 
