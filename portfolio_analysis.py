@@ -410,20 +410,45 @@ def estimate_jensens_alpha(returns, factors, rf, use_zero_beta=False, w_z=None):
     betas : pd.DataFrame
         Betas for each portfolio
     """
+    # Align dates - use intersection of dates
+    common_dates = returns.index.intersection(rf.index)
+    
+    # Remove duplicates if any
+    common_dates = common_dates[~common_dates.duplicated()]
+    
+    # Filter to common dates
+    returns_aligned = returns.loc[common_dates]
+    rf_aligned = rf.loc[common_dates]
+    factors_aligned = factors.loc[common_dates] if hasattr(factors, 'loc') else factors
+    
+    # Remove any remaining duplicates
+    returns_aligned = returns_aligned[~returns_aligned.index.duplicated(keep='first')]
+    rf_aligned = rf_aligned[~rf_aligned.index.duplicated(keep='first')]
+    
+    # Align again after deduplication
+    common_dates = returns_aligned.index.intersection(rf_aligned.index)
+    returns_aligned = returns_aligned.loc[common_dates]
+    rf_aligned = rf_aligned.loc[common_dates]
+    if hasattr(factors, 'loc'):
+        factors_aligned = factors_aligned.loc[common_dates]
+    
     # Excess returns
-    excess_returns = returns.subtract(rf, axis=0)
+    excess_returns = returns_aligned.subtract(rf_aligned, axis=0)
     
     alphas = {}
     betas_dict = {}
     
-    for portfolio in returns.columns:
+    for portfolio in returns_aligned.columns:
         portfolio_excess = excess_returns[portfolio]
         
         if use_zero_beta and w_z is not None:
             # Zero-β CAPM: r_i - r_z = α_i + β_i(r_m - r_z)
             # Compute zero-β portfolio return
-            z_return = (returns @ w_z).iloc[:, 0] if isinstance(returns, pd.DataFrame) else returns @ w_z
-            market_excess = portfolio_excess - (z_return - rf)
+            z_return = (returns_aligned @ w_z)
+            if isinstance(z_return, pd.DataFrame):
+                z_return = z_return.iloc[:, 0]
+            z_return_aligned = z_return.loc[common_dates] if hasattr(z_return, 'loc') else z_return
+            market_excess = portfolio_excess - (z_return_aligned - rf_aligned)
             
             # Regression: r_i - r_z = α_i + β_i(r_m - r_z)
             X = market_excess.values.reshape(-1, 1)
@@ -437,11 +462,11 @@ def estimate_jensens_alpha(returns, factors, rf, use_zero_beta=False, w_z=None):
         else:
             # Standard CAPM: r_i - r_f = α_i + β_i(r_m - r_f)
             # Use market factor (Mkt-RF) as market return
-            if 'Mkt-RF' in factors.columns:
-                market_excess = factors['Mkt-RF']
+            if hasattr(factors_aligned, 'columns') and 'Mkt-RF' in factors_aligned.columns:
+                market_excess = factors_aligned['Mkt-RF'].loc[common_dates]
             else:
                 # If no Mkt-RF, use first factor
-                market_excess = factors.iloc[:, 0]
+                market_excess = factors_aligned.iloc[:, 0].loc[common_dates] if hasattr(factors_aligned, 'loc') else factors_aligned.iloc[:, 0]
             
             # Regression: r_i - r_f = α_i + β_i(r_m - r_f)
             X = market_excess.values.reshape(-1, 1)
@@ -523,9 +548,13 @@ def main():
         print("  Warning: RF not found in factors, using zero")
         rf = pd.Series(0, index=factors.index)
     
+    # Map w_z to full portfolio set (with zeros for filtered portfolios)
+    w_z_full = pd.Series(0.0, index=returns.columns)
+    w_z_full[portfolio_names] = w_z
+    
     # Zero-β CAPM version
     print("  Zero-β CAPM version...")
-    alphas_zb, betas_zb = estimate_jensens_alpha(returns, factors, rf, use_zero_beta=True, w_z=w_z)
+    alphas_zb, betas_zb = estimate_jensens_alpha(returns, factors, rf, use_zero_beta=True, w_z=w_z_full.values)
     
     # Standard CAPM version
     print("  Standard CAPM (with Rf) version...")
