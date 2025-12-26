@@ -102,6 +102,9 @@ def load_portfolio_data(portfolio_type="size", start_year=1927, end_year=2013):
     if df.abs().max().max() > 1:
         df = df / 100.0
     
+    # Convert net returns (r) to gross returns (R = 1 + r)
+    df = 1 + df
+    
     return df
 
 
@@ -222,24 +225,40 @@ def load_factors(start_year=1927, end_year=2013, prefer_annual=False):
     if df.abs().max().max() > 1:
         df = df / 100.0
     
+    # Convert net returns (r) to gross returns (R = 1 + r) for all columns
+    # Note: RF (risk-free rate) is converted to gross return R_f = 1 + r_f
+    # Note: Factor columns like 'Mkt-RF', 'SMB', 'HML' are excess returns (r - r_f),
+    #       so we convert them to gross excess: (r - r_f) + 1 = R - R_f + 1
+    #       Actually, for excess returns, we keep them as-is since they're already differences
+    #       But for consistency with portfolio returns, we convert RF to gross
+    if 'RF' in df.columns:
+        df['RF'] = 1 + df['RF']  # Convert RF to gross return
+    
+    # For factor columns (excess returns), we don't convert to gross since they're already differences
+    # But we need to be consistent - actually, let's convert everything to gross
+    # For excess returns like Mkt-RF: if it's r_m - r_f, then gross would be (1 + r_m) - (1 + r_f) = R_m - R_f
+    # But that's still an excess return, just in gross terms
+    # Actually, let's keep excess returns as excess returns (they're differences, not levels)
+    # Only convert RF to gross, and keep other factors as excess returns
+    
     return df
 
 
 def compute_moments(returns):
     """
-    Compute mean returns and covariance matrix
+    Compute mean returns and covariance matrix for gross returns
     
     Parameters:
     -----------
     returns : pd.DataFrame
-        Returns data (time x assets)
+        Gross returns data (R = 1 + r, time x assets)
     
     Returns:
     --------
     mu : np.array
-        Mean returns
+        Mean gross returns (E[R])
     Sigma : np.array
-        Covariance matrix
+        Covariance matrix of gross returns (Cov(R))
     portfolio_names : list
         Names of portfolios used (after filtering)
     """
@@ -255,8 +274,8 @@ def compute_moments(returns):
     returns_filtered = returns.loc[:, valid_portfolios]
     portfolio_names = returns_filtered.columns.tolist()
     
-    mu = returns_filtered.mean().values
-    Sigma = returns_filtered.cov().values
+    mu = returns_filtered.mean().values  # Mean gross returns E[R]
+    Sigma = returns_filtered.cov().values  # Covariance of gross returns Cov(R)
     
     return mu, Sigma, portfolio_names
 
@@ -350,38 +369,33 @@ def find_msmp(mu, Sigma):
     """
     Find Minimum Second Moment Portfolio (MSMP)
     
-    MSMP minimizes E[R²] where R = 1 + r is the gross return.
-    For net returns r with mean μ and covariance Σ:
-    E[R²] = E[(1 + w'r)²] = 1 + 2w'μ + w'Σw + (w'μ)²
-    
-    Since the constant 1 doesn't affect minimization, we minimize:
-    2w'μ + w'Σw + (w'μ)² = 2w'μ + w'(Σ + μμ')w
+    MSMP minimizes E[(w'R)²] where R are gross returns.
+    E[(w'R)²] = w'Σ_R w + (w'μ_R)² = w'(Σ_R + μ_R μ_R')w
     
     Parameters:
     -----------
     mu : np.array
-        Mean net returns (r)
+        Mean gross returns (E[R])
     Sigma : np.array
-        Covariance matrix of net returns
+        Covariance matrix of gross returns (Cov(R))
     
     Returns:
     --------
     w_msmp : np.array
         MSMP portfolio weights
     msmp_return : float
-        MSMP expected return (net return)
+        MSMP expected gross return (E[w'R])
     msmp_vol : float
-        MSMP volatility
+        MSMP volatility (std of w'R)
     """
     n = len(mu)
     
-    # Second moment matrix: Σ + μμ'
+    # Second moment matrix: Σ_R + μ_R μ_R'
     M = Sigma + np.outer(mu, mu)
     
-    # Minimize 2w'μ + w'Mw subject to budget constraint
-    # This is equivalent to minimizing E[(1 + w'r)²] = E[R²]
+    # Minimize w'Mw = E[(w'R)²] subject to budget constraint
     def objective(w):
-        return 2 * (mu.T @ w) + w.T @ M @ w
+        return w.T @ M @ w
     
     constraints = {'type': 'eq', 'fun': lambda w: np.sum(w) - 1}
     bounds = [(-1, 1) for _ in range(n)]
@@ -394,8 +408,8 @@ def find_msmp(mu, Sigma):
         raise ValueError("Failed to find MSMP")
     
     w_msmp = result.x
-    msmp_return = mu.T @ w_msmp
-    msmp_vol = np.sqrt(w_msmp.T @ Sigma @ w_msmp)
+    msmp_return = mu.T @ w_msmp  # E[w'R] (gross return)
+    msmp_vol = np.sqrt(w_msmp.T @ Sigma @ w_msmp)  # std(w'R)
     
     return w_msmp, msmp_return, msmp_vol
 
@@ -453,19 +467,19 @@ def find_optimal_crra_portfolio(mu, Sigma, rra=4):
 
 def find_zero_beta_portfolio(mu, Sigma, w_m):
     """
-    Find Zero-β portfolio for a given portfolio w_m
+    Find Zero-β portfolio for a given portfolio w_m using gross returns
     
     Zero-β portfolio w_z satisfies:
-    - β_z = Cov(r_z, r_m) / Var(r_m) = 0
-    - This means Cov(r_z, r_m) = 0
-    - w_z'Σw_m = 0
+    - β_z = Cov(R_z, R_m) / Var(R_m) = 0
+    - This means Cov(R_z, R_m) = 0
+    - w_z'Σ_R w_m = 0
     
     Parameters:
     -----------
     mu : np.array
-        Mean returns
+        Mean gross returns (E[R])
     Sigma : np.array
-        Covariance matrix
+        Covariance matrix of gross returns (Cov(R))
     w_m : np.array
         Market/optimal portfolio weights
     
@@ -474,9 +488,9 @@ def find_zero_beta_portfolio(mu, Sigma, w_m):
     w_z : np.array
         Zero-β portfolio weights
     z_return : float
-        Zero-β expected return
+        Zero-β expected gross return (E[w_z'R])
     z_vol : float
-        Zero-β volatility
+        Zero-β volatility (std of w_z'R)
     """
     n = len(mu)
     
@@ -598,16 +612,16 @@ def find_zero_beta_portfolio(mu, Sigma, w_m):
 
 def estimate_jensens_alpha(returns, factors, rf, use_zero_beta=False, w_z=None, w_m=None):
     """
-    Estimate Jensen's α for each portfolio
+    Estimate Jensen's α for each portfolio using gross returns
     
     Parameters:
     -----------
     returns : pd.DataFrame
-        Portfolio returns (time x portfolios)
+        Portfolio gross returns (R = 1 + r, time x portfolios)
     factors : pd.DataFrame
-        Factor returns (time x factors)
+        Factor gross returns (R = 1 + r, time x factors)
     rf : pd.Series
-        Risk-free rate
+        Risk-free gross return (R_f = 1 + r_f)
     use_zero_beta : bool
         If True, use zero-β CAPM; if False, use standard CAPM with Rf
     w_z : np.array, optional
@@ -644,7 +658,7 @@ def estimate_jensens_alpha(returns, factors, rf, use_zero_beta=False, w_z=None, 
     if hasattr(factors, 'loc'):
         factors_aligned = factors_aligned.loc[common_dates]
     
-    # Excess returns
+    # Excess gross returns: R_i - R_f = (1 + r_i) - (1 + r_f) = r_i - r_f
     excess_returns = returns_aligned.subtract(rf_aligned, axis=0)
     
     alphas = {}
@@ -772,27 +786,27 @@ def exclude_small_caps(returns, portfolio_type="size"):
 
 def recentre_returns(returns, factors, rf):
     """
-    Recentre the data set by aligning means with CAPM and betas
+    Recentre the data set by aligning means with CAPM and betas (using gross returns)
     
-    This adjusts portfolio returns so that their means align with CAPM predictions
+    This adjusts portfolio gross returns so that their means align with CAPM predictions
     based on their betas. The recentring process:
-    1. Estimate betas for each portfolio
-    2. Calculate expected returns from CAPM: E[r_i] = r_f + β_i * (E[r_m] - r_f)
-    3. Adjust returns: r_i_recentred = r_i - (mean(r_i) - E[r_i])
+    1. Estimate betas for each portfolio (from excess returns)
+    2. Calculate expected gross returns from CAPM: E[R_i] = R_f + β_i * (E[R_m] - R_f)
+    3. Adjust returns: R_i_recentred = R_i - (mean(R_i) - E[R_i])
     
     Parameters:
     -----------
     returns : pd.DataFrame
-        Portfolio returns (time x portfolios)
+        Portfolio gross returns (R = 1 + r, time x portfolios)
     factors : pd.DataFrame
-        Factor returns (time x factors)
+        Factor gross returns (R = 1 + r, time x factors)
     rf : pd.Series
-        Risk-free rate
+        Risk-free gross return (R_f = 1 + r_f)
     
     Returns:
     --------
     returns_recentred : pd.DataFrame
-        Recentred portfolio returns (same index as input returns)
+        Recentred portfolio gross returns (same index as input returns)
     """
     # Align dates
     common_dates = returns.index.intersection(rf.index)
@@ -802,25 +816,25 @@ def recentre_returns(returns, factors, rf):
     rf_aligned = rf.loc[common_dates]
     factors_aligned = factors.loc[common_dates] if hasattr(factors, 'loc') else factors
     
-    # Get market excess return
+    # Get market excess return (Mkt-RF is already excess, but we need gross market return)
     if hasattr(factors_aligned, 'columns') and 'Mkt-RF' in factors_aligned.columns:
-        market_excess = factors_aligned['Mkt-RF']
+        market_excess = factors_aligned['Mkt-RF']  # This is r_m - r_f (net excess)
     else:
         market_excess = factors_aligned.iloc[:, 0]
     
-    # Calculate market return
+    # Calculate market gross return: R_m = 1 + r_m = 1 + (r_m - r_f) + r_f = (r_m - r_f) + (1 + r_f) = market_excess + R_f
     market_return = market_excess + rf_aligned
     
-    # Expected market return and risk-free rate
-    E_rf = rf_aligned.mean()
-    E_rm = market_return.mean()
-    market_excess_mean = E_rm - E_rf
+    # Expected market gross return and risk-free gross return
+    E_Rf = rf_aligned.mean()
+    E_Rm = market_return.mean()
+    market_excess_mean = E_Rm - E_Rf  # E[R_m] - E[R_f] = E[r_m] - E[r_f] (same as net excess)
     
     # Recentre each portfolio
     returns_recentred = returns.copy()  # Start with original to preserve all dates
     
     for portfolio in returns_aligned.columns:
-        # Estimate beta
+        # Estimate beta from excess returns (R_i - R_f = r_i - r_f)
         portfolio_excess = returns_aligned[portfolio] - rf_aligned
         common_dates_port = portfolio_excess.index.intersection(market_excess.index)
         
@@ -837,14 +851,14 @@ def recentre_returns(returns, factors, rf):
         except:
             beta_i = 0
         
-        # Expected return from CAPM
-        E_ri = E_rf + beta_i * market_excess_mean
+        # Expected gross return from CAPM: E[R_i] = R_f + β_i * (E[R_m] - R_f)
+        E_Ri = E_Rf + beta_i * market_excess_mean
         
-        # Actual mean return
-        mean_ri = returns_aligned[portfolio].mean()
+        # Actual mean gross return
+        mean_Ri = returns_aligned[portfolio].mean()
         
         # Adjustment: subtract the difference between actual and expected mean
-        adjustment = mean_ri - E_ri
+        adjustment = mean_Ri - E_Ri
         
         # Apply adjustment to all dates (not just common dates)
         returns_recentred[portfolio] = returns[portfolio] - adjustment
@@ -945,7 +959,7 @@ def main(start_year=1927, end_year=2013, portfolio_type="size", rra=4,
     print("\nComputing moments...")
     mu, Sigma, portfolio_names = compute_moments(returns)
     print(f"  Using {len(portfolio_names)} portfolios (filtered from {len(returns.columns)})")
-    print(f"  Mean returns range: [{mu.min():.4f}, {mu.max():.4f}]")
+    print(f"  Mean gross returns range: [{mu.min():.4f}, {mu.max():.4f}] (net: [{mu.min()-1:.4f}, {mu.max()-1:.4f}])")
     print(f"  Annualized volatility range: [{np.sqrt(np.diag(Sigma)).min():.4f}, {np.sqrt(np.diag(Sigma)).max():.4f}]")
     
     # Construct MV frontier
@@ -956,19 +970,23 @@ def main(start_year=1927, end_year=2013, portfolio_type="size", rra=4,
     # Find MSMP
     print("\nFinding MSMP portfolio...")
     w_msmp, msmp_return, msmp_vol = find_msmp(mu, Sigma)
-    print(f"  MSMP return: {msmp_return:.4f}")
+    # Convert gross returns to net returns for display (r = R - 1)
+    msmp_return_net = msmp_return - 1
+    print(f"  MSMP return (gross): {msmp_return:.4f} (net: {msmp_return_net:.4f})")
     print(f"  MSMP volatility: {msmp_vol:.4f}")
     
     # Find optimal CRRA portfolio
     print(f"\nFinding optimal portfolio for CRRA investor (RRA={rra})...")
     w_opt, opt_return, opt_vol = find_optimal_crra_portfolio(mu, Sigma, rra)
-    print(f"  Optimal return: {opt_return:.4f}")
+    opt_return_net = opt_return - 1
+    print(f"  Optimal return (gross): {opt_return:.4f} (net: {opt_return_net:.4f})")
     print(f"  Optimal volatility: {opt_vol:.4f}")
     
     # Find Zero-β portfolio
     print("\nFinding Zero-β portfolio for optimal portfolio...")
     w_z, z_return, z_vol = find_zero_beta_portfolio(mu, Sigma, w_opt)
-    print(f"  Zero-β return: {z_return:.4f}")
+    z_return_net = z_return - 1
+    print(f"  Zero-β return (gross): {z_return:.4f} (net: {z_return_net:.4f})")
     print(f"  Zero-β volatility: {z_vol:.4f}")
     
     # Estimate Jensen's α
