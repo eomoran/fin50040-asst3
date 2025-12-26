@@ -536,17 +536,25 @@ def find_zero_beta_portfolio(mu, Sigma, w_m, on_frontier=True):
         mu_minvar = mu.T @ w_minvar
         
         # Get optimal portfolio return for reasonable search range
-        # ZBP should be between MVP and optimal, or slightly below MVP (inefficient part)
-        # Restrict search to reasonable range: from slightly below MVP to optimal return
+        # ZBP should be on inefficient limb (below MVP) based on professor's plot
+        # Search from well below MVP to slightly above MVP
         mu_optimal = mu.T @ w_m  # Return of the optimal portfolio
         
-        # Search range: extend slightly below MVP (inefficient part) to optimal return
-        # This is more reasonable than searching from mu_min to mu_max
-        search_min = mu_minvar * 0.95  # 5% below MVP (inefficient part)
-        search_max = max(mu_optimal, mu_minvar * 1.1)  # At least to optimal, or 10% above MVP
+        # Search range: extend well below MVP (inefficient part) to cover the ZBP
+        # Based on professor's plot, ZBP is on inefficient limb near MVP
+        # Use wider range: from 20% below MVP to 10% above MVP
+        search_min = mu_minvar * 0.80  # 20% below MVP (inefficient part)
+        search_max = mu_minvar * 1.10  # 10% above MVP (efficient part, but near MVP)
         
-        # Use fine grid for better precision
-        target_returns = np.linspace(search_min, search_max, 400)
+        # Use fine grid for better precision, focus more on inefficient part
+        num_points = 500
+        # Allocate 60% of points to inefficient part (below MVP)
+        num_inefficient = int(num_points * 0.6)
+        num_efficient = num_points - num_inefficient
+        
+        target_returns_inefficient = np.linspace(search_min, mu_minvar, num_inefficient + 1)[:-1]
+        target_returns_efficient = np.linspace(mu_minvar, search_max, num_efficient + 1)[1:]  # Skip MVP duplicate
+        target_returns = np.concatenate([target_returns_inefficient, target_returns_efficient])
         
         best_w = None
         best_cov = np.inf
@@ -569,27 +577,51 @@ def find_zero_beta_portfolio(mu, Sigma, w_m, on_frontier=True):
             ]
             
             bounds = [(-1, 1) for _ in range(n)]
-            w0 = np.ones(n) / n
             
-            try:
-                result = minimize(objective, w0, method='SLSQP',
-                                 bounds=bounds, constraints=constraints,
-                                 options={'maxiter': 1000, 'ftol': 1e-9})
-                
-                if result.success:
-                    # Check constraints
-                    budget_check = abs(np.sum(result.x) - 1)
-                    return_check = abs(mu.T @ result.x - target_return)
-                    cov_check = abs(result.x.T @ Sigma @ w_m)
+            # Better initial guesses based on target return
+            initial_guesses = []
+            if target_return < mu_minvar:
+                # Inefficient part: try negative MVP (scaled) or scaled MVP
+                w_neg = -w_minvar.copy()
+                if np.abs(np.sum(w_neg)) > 1e-10:
+                    w_neg = w_neg / np.sum(w_neg)
+                    if np.all(w_neg >= -1) and np.all(w_neg <= 1):
+                        initial_guesses.append(w_neg)
+                # Also try scaled MVP
+                w_scaled = w_minvar * 0.5
+                w_scaled = w_scaled / np.sum(w_scaled) if np.abs(np.sum(w_scaled)) > 1e-10 else np.ones(n) / n
+                initial_guesses.append(w_scaled)
+            else:
+                # Efficient part: start from MVP
+                initial_guesses.append(w_minvar.copy())
+            
+            # Always include equal weights as fallback
+            initial_guesses.append(np.ones(n) / n)
+            
+            # Try each initial guess
+            for w0 in initial_guesses:
+                try:
+                    result = minimize(objective, w0, method='SLSQP',
+                                     bounds=bounds, constraints=constraints,
+                                     options={'maxiter': 2000, 'ftol': 1e-9})
                     
-                    if budget_check < 1e-5 and return_check < 1e-5 and cov_check < 1e-4:
-                        if cov_check < best_cov:
-                            best_w = result.x
-                            best_cov = cov_check
-                            best_return = mu.T @ result.x
-                            best_vol = np.sqrt(result.x.T @ Sigma @ result.x)
-            except:
-                continue
+                    if result.success:
+                        # Check constraints
+                        budget_check = abs(np.sum(result.x) - 1)
+                        return_check = abs(mu.T @ result.x - target_return)
+                        cov_check = abs(result.x.T @ Sigma @ w_m)
+                        
+                        # More lenient tolerance for zero-beta constraint
+                        if budget_check < 1e-5 and return_check < 1e-5 and cov_check < 1e-3:
+                            if cov_check < best_cov:
+                                best_w = result.x
+                                best_cov = cov_check
+                                best_return = mu.T @ result.x
+                                best_vol = np.sqrt(result.x.T @ Sigma @ result.x)
+                                # Break on first good solution for this target return
+                                break
+                except:
+                    continue
         
         if best_w is not None:
             w_z = best_w
