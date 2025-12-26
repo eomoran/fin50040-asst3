@@ -124,8 +124,12 @@ def load_factors(start_year=1927, end_year=2013, prefer_annual=False):
     # Prefer annual factors if requested
     if prefer_annual:
         # Prefer US factors (F-F_Research_Data) over Asia Pacific
+        # For 1927-2013 period, prefer 3-factor model (has data from 1927) over 5-factor (starts 1963)
         annual_files = [f for f in files if 'Annual' in f.name]
-        us_annual_files = [f for f in annual_files if 'F-F_Research_Data' in f.name or '5_Factors_2x3' in f.name]
+        # Prefer 3-factor model (covers 1927+) over 5-factor (starts 1963)
+        us_annual_3f = [f for f in annual_files if 'F-F_Research_Data_Factors' in f.name and '5' not in f.name]
+        us_annual_5f = [f for f in annual_files if 'F-F_Research_Data' in f.name and '5_Factors' in f.name]
+        us_annual_files = us_annual_3f + us_annual_5f  # Prefer 3-factor first
         
         use_annual = False
         if us_annual_files:
@@ -155,8 +159,11 @@ def load_factors(start_year=1927, end_year=2013, prefer_annual=False):
                 print(f"  Annual factors only cover {df.index.min().year}-{df.index.max().year}, using monthly factors and aggregating")
             
             # Use monthly factors and aggregate to annual
+            # Prefer 3-factor model (covers 1927+) over 5-factor (starts 1963)
             monthly_files = [f for f in files if 'Annual' not in f.name]
-            us_monthly_files = [f for f in monthly_files if 'F-F_Research_Data' in f.name or '5_Factors_2x3' in f.name]
+            us_monthly_3f = [f for f in monthly_files if 'F-F_Research_Data_Factors' in f.name and '5' not in f.name]
+            us_monthly_5f = [f for f in monthly_files if 'F-F_Research_Data' in f.name and '5_Factors' in f.name]
+            us_monthly_files = us_monthly_3f + us_monthly_5f  # Prefer 3-factor first
             if us_monthly_files:
                 file_to_use = us_monthly_files[0]
             elif monthly_files:
@@ -185,8 +192,11 @@ def load_factors(start_year=1927, end_year=2013, prefer_annual=False):
             print(f"  Aggregated {len(df)} annual observations from monthly data")
     else:
         # Prefer monthly (non-annual) factors, and US over Asia Pacific
+        # Prefer 3-factor model (covers 1927+) over 5-factor (starts 1963)
         monthly_files = [f for f in files if 'Annual' not in f.name]
-        us_monthly_files = [f for f in monthly_files if 'F-F_Research_Data' in f.name or '5_Factors_2x3' in f.name]
+        us_monthly_3f = [f for f in monthly_files if 'F-F_Research_Data_Factors' in f.name and '5' not in f.name]
+        us_monthly_5f = [f for f in monthly_files if 'F-F_Research_Data' in f.name and '5_Factors' in f.name]
+        us_monthly_files = us_monthly_3f + us_monthly_5f  # Prefer 3-factor first
         if us_monthly_files:
             file_to_use = us_monthly_files[0]
         elif monthly_files:
