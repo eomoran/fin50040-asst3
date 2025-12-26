@@ -123,10 +123,25 @@ def compute_moments(returns):
         Mean returns
     Sigma : np.array
         Covariance matrix
+    portfolio_names : list
+        Names of portfolios used (after filtering)
     """
-    mu = returns.mean().values
-    Sigma = returns.cov().values
-    return mu, Sigma
+    # Remove portfolios with zero or very low variance (constant returns)
+    variances = returns.var()
+    min_variance = 1e-10  # Minimum variance threshold
+    valid_portfolios = variances > min_variance
+    
+    if valid_portfolios.sum() < 2:
+        raise ValueError("Not enough portfolios with non-zero variance")
+    
+    # Filter returns to only valid portfolios
+    returns_filtered = returns.loc[:, valid_portfolios]
+    portfolio_names = returns_filtered.columns.tolist()
+    
+    mu = returns_filtered.mean().values
+    Sigma = returns_filtered.cov().values
+    
+    return mu, Sigma, portfolio_names
 
 
 def construct_mv_frontier(mu, Sigma, num_portfolios=100):
@@ -155,7 +170,13 @@ def construct_mv_frontier(mu, Sigma, num_portfolios=100):
     
     # Solve for minimum variance portfolio
     ones = np.ones(n)
-    inv_Sigma = np.linalg.inv(Sigma)
+    
+    # Use pseudo-inverse for robustness (handles near-singular matrices)
+    try:
+        inv_Sigma = np.linalg.inv(Sigma)
+    except np.linalg.LinAlgError:
+        # If singular, use pseudo-inverse
+        inv_Sigma = np.linalg.pinv(Sigma)
     
     # Minimum variance portfolio weights
     w_minvar = inv_Sigma @ ones / (ones.T @ inv_Sigma @ ones)
@@ -466,7 +487,8 @@ def main():
     
     # Compute moments
     print("\nComputing moments...")
-    mu, Sigma = compute_moments(returns)
+    mu, Sigma, portfolio_names = compute_moments(returns)
+    print(f"  Using {len(portfolio_names)} portfolios (filtered from {len(returns.columns)})")
     print(f"  Mean returns range: [{mu.min():.4f}, {mu.max():.4f}]")
     print(f"  Annualized volatility range: [{np.sqrt(np.diag(Sigma)).min():.4f}, {np.sqrt(np.diag(Sigma)).max():.4f}]")
     
@@ -534,10 +556,19 @@ def main():
         'frontier': frontier
     }
     
-    # Save to files
-    pd.Series(w_msmp, index=returns.columns).to_csv(OUTPUT_DIR / "msmp_weights.csv")
-    pd.Series(w_opt, index=returns.columns).to_csv(OUTPUT_DIR / "optimal_weights.csv")
-    pd.Series(w_z, index=returns.columns).to_csv(OUTPUT_DIR / "zero_beta_weights.csv")
+    # Save to files (use portfolio_names for indexing)
+    # Create full weight vectors with zeros for filtered portfolios
+    w_msmp_full = pd.Series(0.0, index=returns.columns)
+    w_msmp_full[portfolio_names] = w_msmp
+    w_msmp_full.to_csv(OUTPUT_DIR / "msmp_weights.csv")
+    
+    w_opt_full = pd.Series(0.0, index=returns.columns)
+    w_opt_full[portfolio_names] = w_opt
+    w_opt_full.to_csv(OUTPUT_DIR / "optimal_weights.csv")
+    
+    w_z_full = pd.Series(0.0, index=returns.columns)
+    w_z_full[portfolio_names] = w_z
+    w_z_full.to_csv(OUTPUT_DIR / "zero_beta_weights.csv")
     alphas_zb.to_csv(OUTPUT_DIR / "jensens_alpha_zerobeta.csv")
     alphas_rf.to_csv(OUTPUT_DIR / "jensens_alpha_rf.csv")
     
