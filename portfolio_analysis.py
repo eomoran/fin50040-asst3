@@ -70,13 +70,21 @@ def load_portfolio_data(portfolio_type="size", start_year=1927, end_year=2013):
     
     df = pd.read_csv(file_to_use, index_col=0)
     
-    # Parse dates - Fama-French uses YYYYMM format
+    # Parse dates - Fama-French uses various formats:
+    # - YYYYMM format (monthly data)
+    # - YYYY-MM-DD format (annual data from processed files)
+    # - YYYY format (some annual data)
     if df.index.dtype == 'object' or not isinstance(df.index, pd.DatetimeIndex):
-        # Try to parse as YYYYMM format
-        try:
+        # Try to detect format
+        sample = str(df.index[0]) if len(df) > 0 else ''
+        if len(sample) == 6 and sample.isdigit():
+            # YYYYMM format (monthly)
             df.index = pd.to_datetime(df.index.astype(str), format='%Y%m', errors='coerce')
-        except:
-            # If that fails, try standard parsing
+        elif len(sample) == 4 and sample.isdigit():
+            # YYYY format (annual)
+            df.index = pd.to_datetime(df.index.astype(str) + '-01-01', format='%Y-%m-%d', errors='coerce')
+        else:
+            # Try standard parsing (handles YYYY-MM-DD and other formats)
             df.index = pd.to_datetime(df.index, errors='coerce')
     
     # Drop any rows with NaT dates
