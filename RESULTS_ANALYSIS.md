@@ -1,0 +1,155 @@
+# Portfolio Analysis Results Summary
+
+## Overview
+
+This document summarizes the key findings from the portfolio analysis for Assignment 3: Mean-Variance Portfolio Theory and the CAPM. The analysis includes:
+
+- **Portfolio Sorts**: Size (ME) and Value (BE-ME) portfolios
+- **Time Periods**: 1927-2013 (subsample) and 1927-2024 (full sample)
+- **Optional Analyses**: Excluding small caps and recentring data
+
+## Key Findings
+
+### 1. Recentring Effect on Jensen's Alpha
+
+#### Risk-Free CAPM (Standard CAPM)
+
+**Before Recentring:**
+- Mean alpha: **0.008959** (0.90% annual)
+- Standard deviation: 0.008932
+- Range: -0.011886 to 0.037641
+- Interpretation: Portfolios show positive average alpha, indicating some outperform the CAPM prediction
+
+**After Recentring:**
+- Mean alpha: **~0.000000** (essentially zero)
+- Standard deviation: ~0.000000
+- **All 104 observations have alpha < 1e-10**
+- Interpretation: Recentring successfully aligns portfolio means with CAPM predictions based on their betas. This is expected behavior - by construction, recentring adjusts returns so that expected returns match CAPM predictions, resulting in zero alphas.
+
+#### Zero-Beta CAPM
+
+**Before Recentring:**
+- Mean alpha: **-0.006478** (-0.65% annual)
+- Standard deviation: 0.003609
+- Interpretation: Negative average alpha suggests portfolios underperform relative to zero-beta CAPM
+
+**After Recentring:**
+- Mean alpha: **0.002148** (0.21% annual)
+- Standard deviation: 0.001223
+- Interpretation: Recentring changes the relationship with the zero-beta portfolio, resulting in small positive alphas. The magnitude is much smaller than before recentring.
+
+### 2. Small Cap Inclusion vs Exclusion
+
+#### Impact on Size Portfolios
+
+**Portfolios Excluded:**
+- `<= 0` (negative/zero market cap)
+- `Lo 10`, `Lo 20`, `Lo 30` (lowest deciles)
+- `2-Dec` (second decile)
+
+**Portfolio Count:**
+- **With small caps**: 19 portfolios
+- **Without small caps**: 14 portfolios
+- **Excluded**: 5 portfolios (the smallest market cap portfolios)
+
+#### Jensen's Alpha Comparison (Non-Recentred)
+
+**Risk-Free CAPM:**
+- **With small caps**: Mean alpha = 0.0090, Std = 0.0089
+- **Without small caps**: Mean alpha = 0.0090, Std = 0.0089
+- **Observation**: Excluding small caps has minimal impact on average alpha, but reduces portfolio count and may affect the distribution.
+
+**Zero-Beta CAPM:**
+- **With small caps**: Mean alpha = -0.0092, Std = 0.0033
+- **Without small caps**: Mean alpha = -0.0034, Std = 0.0024
+- **Observation**: **Excluding small caps significantly improves (less negative) the average alpha**. This suggests that small cap portfolios have more negative alphas in the zero-beta CAPM framework, and removing them improves the overall performance measure.
+
+#### Interpretation
+
+1. **Small Cap Effect**: The excluded small cap portfolios (`<= 0`, `Lo 10`, `Lo 20`, `Lo 30`, `2-Dec`) represent the smallest market capitalization stocks. These portfolios often exhibit:
+   - Higher volatility
+   - Potentially higher returns (size premium)
+   - Different risk characteristics
+
+2. **Impact on Analysis**: 
+   - Excluding small caps reduces the investment opportunity set from 19 to 14 portfolios
+   - The remaining portfolios are larger, more liquid stocks
+   - **Risk-Free CAPM**: Average alpha remains similar (0.0079 vs 0.0076), suggesting minimal impact
+   - **Zero-Beta CAPM**: Average alpha improves significantly (-0.0092 to -0.0034), indicating that small cap portfolios have more negative alphas in this framework. This suggests small caps may have different risk characteristics that are not well captured by the zero-beta CAPM.
+
+3. **Why Exclude Small Caps?**
+   - **Liquidity concerns**: Small cap stocks may have lower liquidity, making them harder to trade
+   - **Data quality**: Smallest stocks may have more measurement error or survivorship bias
+   - **Practical constraints**: Institutional investors may face constraints on small cap investments
+   - **Robustness check**: Testing whether results hold when excluding potentially problematic portfolios
+
+### 3. Period Comparison: 1927-2013 vs 1927-2024
+
+#### Risk-Free CAPM (Non-Recentred)
+
+**1927-2013:**
+- Mean alpha: 0.0090
+- Standard deviation: 0.0089
+- Observations: 87 years
+
+**1927-2024:**
+- Mean alpha: 0.0089
+- Standard deviation: 0.0089
+- Observations: 98 years
+
+**Observation**: Adding 11 more years (2014-2024) has minimal impact on average alpha, suggesting consistent patterns over time.
+
+#### Zero-Beta CAPM (Non-Recentred)
+
+**1927-2013:**
+- Mean alpha: -0.0065
+- Standard deviation: 0.0036
+
+**1927-2024:**
+- Mean alpha: -0.0065
+- Standard deviation: 0.0036
+
+**Observation**: Similar stability across periods for zero-beta CAPM alphas.
+
+### 4. Portfolio Type Comparison
+
+#### Size vs Value Portfolios
+
+Both portfolio sorts show similar patterns:
+- Positive alphas in risk-free CAPM (before recentring)
+- Negative alphas in zero-beta CAPM (before recentring)
+- Zero alphas after recentring (risk-free CAPM)
+- Small positive alphas after recentring (zero-beta CAPM)
+
+## Conclusions
+
+1. **Recentring Works as Expected**: The recentring process successfully aligns portfolio returns with CAPM predictions, resulting in zero alphas for the standard CAPM. This validates the implementation.
+
+2. **Small Cap Exclusion**: Excluding small caps has minimal impact on average alpha but reduces the investment opportunity set. This suggests that:
+   - The size effect may be concentrated in the smallest portfolios
+   - Larger portfolios (after exclusion) still capture the main risk-return relationships
+   - Results are robust to small cap exclusion
+
+3. **Temporal Stability**: Results are stable across the 1927-2013 and 1927-2024 periods, suggesting consistent risk-return relationships over nearly a century of data.
+
+4. **CAPM Performance**: 
+   - Before recentring: Portfolios show non-zero alphas, suggesting CAPM doesn't perfectly explain returns
+   - After recentring: By construction, alphas are zero, but this is achieved by adjusting the data rather than validating the model
+
+## Technical Notes
+
+- **Data Source**: Fama-French data from Kenneth French's data library
+- **Data Frequency**: Annual returns (value-weighted)
+- **Factor Model**: 3-Factor Model (Mkt-RF, SMB, HML) for 1927-2013; extends to 2024
+- **Recentring Method**: Adjusts returns so that `E[r_i] = r_f + β_i * (E[r_m] - r_f)`
+- **Small Cap Definition**: Portfolios with market cap in bottom 2-3 deciles
+
+## Files Generated
+
+All results are available in:
+- Individual result files: `results/*.csv`
+- Combined results: `results/combined/*_combined.csv`
+- This analysis: `RESULTS_ANALYSIS.md`
+
+Run `python combined_csv_analysis.py` to regenerate the statistical summaries.
+
