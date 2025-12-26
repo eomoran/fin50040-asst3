@@ -95,13 +95,41 @@ def load_portfolio_data(portfolio_type="size", start_year=1927, end_year=2013):
     return df
 
 
-def load_factors(start_year=1927, end_year=2013):
-    """Load Fama-French factors and risk-free rate"""
+def load_factors(start_year=1927, end_year=2013, prefer_annual=False):
+    """
+    Load Fama-French factors and risk-free rate
+    
+    Parameters:
+    -----------
+    start_year : int
+        Start year for data
+    end_year : int
+        End year for data
+    prefer_annual : bool
+        If True, prefer annual factors (for annual portfolio returns)
+    """
     files = list(DATA_DIR.glob("*Factors*.csv"))
     if not files:
         raise FileNotFoundError("No factors file found")
     
-    df = pd.read_csv(files[0], index_col=0)
+    # Prefer annual factors if requested
+    if prefer_annual:
+        annual_files = [f for f in files if 'Annual' in f.name]
+        if annual_files:
+            file_to_use = annual_files[0]
+            print(f"  Using annual factors: {file_to_use.name}")
+        else:
+            file_to_use = files[0]
+            print(f"  Using: {file_to_use.name} (annual factors not found)")
+    else:
+        # Prefer monthly (non-annual) factors
+        monthly_files = [f for f in files if 'Annual' not in f.name]
+        if monthly_files:
+            file_to_use = monthly_files[0]
+        else:
+            file_to_use = files[0]
+    
+    df = pd.read_csv(file_to_use, index_col=0)
     
     # Parse dates - Fama-French uses YYYYMM format
     if df.index.dtype == 'object' or not isinstance(df.index, pd.DatetimeIndex):
@@ -493,6 +521,10 @@ def estimate_jensens_alpha(returns, factors, rf, use_zero_beta=False, w_z=None, 
             alpha = beta[0]
             beta_m = beta[1]
             
+            # Debug: Check if regression worked
+            if abs(alpha) < 1e-10 and abs(beta_m) < 1e-10:
+                print(f"        Warning: Very small alpha/beta for {portfolio} - may indicate regression issue")
+            
         else:
             # Standard CAPM: r_i - r_f = α_i + β_i(r_m - r_f)
             # Use market factor (Mkt-RF) as market excess return
@@ -502,14 +534,29 @@ def estimate_jensens_alpha(returns, factors, rf, use_zero_beta=False, w_z=None, 
                 # If no Mkt-RF, use first factor
                 market_excess = factors_aligned.iloc[:, 0].loc[common_dates] if hasattr(factors_aligned, 'loc') else factors_aligned.iloc[:, 0]
             
-            # Regression: r_i - r_f = α_i + β_i(r_m - r_f)
-            X = market_excess.values.reshape(-1, 1)
-            X = np.column_stack([np.ones(len(X)), X])
-            y = portfolio_excess.values
+            # Ensure market_excess and portfolio_excess are aligned
+            common_market_dates = portfolio_excess.index.intersection(market_excess.index)
+            portfolio_excess_aligned = portfolio_excess.loc[common_market_dates]
+            market_excess_aligned = market_excess.loc[common_market_dates]
             
-            beta = np.linalg.lstsq(X, y, rcond=None)[0]
-            alpha = beta[0]
-            beta_m = beta[1]
+            # Regression: r_i - r_f = α_i + β_i(r_m - r_f)
+            X = market_excess_aligned.values.reshape(-1, 1)
+            X = np.column_stack([np.ones(len(X)), X])
+            y = portfolio_excess_aligned.values
+            
+            # Check for valid data
+            if len(y) < 2 or np.all(np.isnan(y)) or np.all(np.isnan(X[:, 1])):
+                print(f"        Warning: Insufficient valid data for {portfolio}")
+                alpha = 0.0
+                beta_m = 0.0
+            else:
+                beta = np.linalg.lstsq(X, y, rcond=None)[0]
+                alpha = beta[0]
+                beta_m = beta[1]
+                
+                # Debug: Check if regression worked
+                if abs(alpha) < 1e-10 and abs(beta_m) < 1e-10:
+                    print(f"        Warning: Very small alpha/beta for {portfolio} - may indicate regression issue")
         
         alphas[portfolio] = alpha
         betas_dict[portfolio] = beta_m
@@ -537,11 +584,21 @@ def main():
     print("Loading data...")
     try:
         returns = load_portfolio_data("size", start_year, end_year)
-        factors = load_factors(start_year, end_year)
+        # Check if we're using annual data
+        is_annual = 'Annual' in str(returns.index[0]) if len(returns) > 0 else False
+        if not is_annual:
+            # Check file name
+            files = list(DATA_DIR.glob("*Portfolios_Formed_on_ME*Annual*.csv"))
+            is_annual = len(files) > 0
+        
+        factors = load_factors(start_year, end_year, prefer_annual=is_annual)
         print(f"  Loaded {len(returns.columns)} portfolios")
         print(f"  Time period: {returns.index[0].date()} to {returns.index[-1].date()}")
+        print(f"  Data frequency: {'Annual' if is_annual else 'Monthly'}")
     except Exception as e:
         print(f"Error loading data: {e}")
+        import traceback
+        traceback.print_exc()
         return
     
     # Compute moments
