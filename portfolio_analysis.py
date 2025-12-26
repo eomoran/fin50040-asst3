@@ -44,12 +44,22 @@ def load_portfolio_data(portfolio_type="size", start_year=1927, end_year=2013):
     else:
         raise ValueError(f"Unknown portfolio type: {portfolio_type}")
     
-    # Find the file
+    # Find the file - prefer monthly value-weighted section
     files = list(DATA_DIR.glob(file_pattern))
     if not files:
         raise FileNotFoundError(f"No file found matching {file_pattern}")
     
-    df = pd.read_csv(files[0], index_col=0)
+    # Prefer monthly value-weighted if available
+    monthly_vw_files = [f for f in files if 'Monthly' in f.name and 'Value' in f.name]
+    if monthly_vw_files:
+        file_to_use = monthly_vw_files[0]
+        print(f"  Using: {file_to_use.name}")
+    else:
+        # Fall back to first file found
+        file_to_use = files[0]
+        print(f"  Using: {file_to_use.name} (no monthly value-weighted found)")
+    
+    df = pd.read_csv(file_to_use, index_col=0)
     
     # Parse dates - Fama-French uses YYYYMM format
     if df.index.dtype == 'object' or not isinstance(df.index, pd.DatetimeIndex):
@@ -386,7 +396,7 @@ def find_zero_beta_portfolio(mu, Sigma, w_m):
     return w_z, z_return, z_vol
 
 
-def estimate_jensens_alpha(returns, factors, rf, use_zero_beta=False, w_z=None):
+def estimate_jensens_alpha(returns, factors, rf, use_zero_beta=False, w_z=None, w_m=None):
     """
     Estimate Jensen's α for each portfolio
     
@@ -402,6 +412,8 @@ def estimate_jensens_alpha(returns, factors, rf, use_zero_beta=False, w_z=None):
         If True, use zero-β CAPM; if False, use standard CAPM with Rf
     w_z : np.array, optional
         Zero-β portfolio weights (if use_zero_beta=True)
+    w_m : np.array, optional
+        Market/optimal portfolio weights (if use_zero_beta=True, needed for market return)
     
     Returns:
     --------
@@ -444,15 +456,29 @@ def estimate_jensens_alpha(returns, factors, rf, use_zero_beta=False, w_z=None):
         if use_zero_beta and w_z is not None:
             # Zero-β CAPM: r_i - r_z = α_i + β_i(r_m - r_z)
             # Compute zero-β portfolio return
-            # w_z should be aligned with returns_aligned.columns
             z_return = (returns_aligned * w_z).sum(axis=1)
             z_return_aligned = z_return.loc[common_dates]
-            market_excess = portfolio_excess - (z_return_aligned - rf_aligned)
+            
+            # Get market return (use optimal portfolio as market)
+            if w_m is not None:
+                market_return = (returns_aligned * w_m).sum(axis=1)
+                market_return_aligned = market_return.loc[common_dates]
+            elif hasattr(factors_aligned, 'columns') and 'Mkt-RF' in factors_aligned.columns:
+                # Fallback to Mkt-RF if optimal portfolio not provided
+                market_return_aligned = (factors_aligned['Mkt-RF'].loc[common_dates] + rf_aligned)
+            else:
+                raise ValueError("Need market portfolio weights (w_m) for zero-beta CAPM")
+            
+            # Market excess over zero-beta: r_m - r_z
+            market_excess = market_return_aligned - z_return_aligned
+            
+            # Dependent variable: r_i - r_z (portfolio return minus zero-beta return)
+            portfolio_return = returns_aligned[portfolio].loc[common_dates]
+            y = (portfolio_return - z_return_aligned).values
             
             # Regression: r_i - r_z = α_i + β_i(r_m - r_z)
             X = market_excess.values.reshape(-1, 1)
             X = np.column_stack([np.ones(len(X)), X])  # Add intercept
-            y = portfolio_excess.values
             
             beta = np.linalg.lstsq(X, y, rcond=None)[0]
             alpha = beta[0]
@@ -460,7 +486,7 @@ def estimate_jensens_alpha(returns, factors, rf, use_zero_beta=False, w_z=None):
             
         else:
             # Standard CAPM: r_i - r_f = α_i + β_i(r_m - r_f)
-            # Use market factor (Mkt-RF) as market return
+            # Use market factor (Mkt-RF) as market excess return
             if hasattr(factors_aligned, 'columns') and 'Mkt-RF' in factors_aligned.columns:
                 market_excess = factors_aligned['Mkt-RF'].loc[common_dates]
             else:
@@ -553,7 +579,10 @@ def main():
     
     # Zero-β CAPM version
     print("  Zero-β CAPM version...")
-    alphas_zb, betas_zb = estimate_jensens_alpha(returns, factors, rf, use_zero_beta=True, w_z=w_z_full.values)
+    w_opt_full = pd.Series(0.0, index=returns.columns)
+    w_opt_full[portfolio_names] = w_opt
+    alphas_zb, betas_zb = estimate_jensens_alpha(returns, factors, rf, use_zero_beta=True, 
+                                                  w_z=w_z_full.values, w_m=w_opt_full.values)
     
     # Standard CAPM version
     print("  Standard CAPM (with Rf) version...")

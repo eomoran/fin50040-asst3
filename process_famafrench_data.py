@@ -51,6 +51,106 @@ def find_data_start_row(csv_path):
     return 0
 
 
+def parse_section(lines, section_label):
+    """
+    Parse a single section of the CSV file
+    """
+    if not lines:
+        return None
+    
+    # Find header row in this section
+    header_idx = None
+    for i, line in enumerate(lines[:50]):  # Check first 50 lines
+        stripped = line.strip()
+        if stripped.startswith(',') and stripped.count(',') > 2:
+            header_idx = i
+            break
+    
+    if header_idx is None:
+        return None
+    
+    # Read this section
+    from io import StringIO
+    section_text = ''.join(lines[header_idx:])
+    
+    try:
+        df = pd.read_csv(
+            StringIO(section_text),
+            header=0,
+            skipinitialspace=True,
+            na_values=['-99.99', '-999', 'NA', '', 'NaN'],
+            on_bad_lines='skip'
+        )
+        
+        # Parse dates
+        first_col = df.columns[0]
+        if df[first_col].dtype == 'object':
+            sample_val = str(df[first_col].iloc[0]) if len(df) > 0 else ''
+            if len(sample_val) == 6 and sample_val.isdigit():
+                df[first_col] = pd.to_datetime(df[first_col].astype(str), format='%Y%m', errors='coerce')
+                df = df.rename(columns={first_col: 'Date'})
+                df = df.set_index('Date')
+                df = df[df.index.notna()]  # Remove invalid dates
+        
+        # Convert numeric columns
+        for col in df.columns:
+            if df[col].dtype == 'object':
+                df[col] = pd.to_numeric(df[col], errors='coerce')
+        
+        return df
+    except Exception as e:
+        print(f"        Error parsing section '{section_label}': {e}")
+        return None
+
+
+def parse_famafrench_csv_sections(csv_path):
+    """
+    Parse a Fama-French CSV file that may contain multiple sections
+    (e.g., Monthly Value Weighted, Monthly Equal Weighted, Annual, etc.)
+    
+    Returns a dictionary of DataFrames, one for each section
+    """
+    sections = {}
+    
+    with open(csv_path, 'r', encoding='utf-8', errors='ignore') as f:
+        lines = f.readlines()
+    
+    current_section = None
+    section_start = None
+    section_label = None
+    
+    for i, line in enumerate(lines):
+        stripped = line.strip()
+        
+        # Check if this is a section header (contains keywords like "Monthly", "Annual", "Value Weight", "Equal Weight")
+        if any(keyword in stripped for keyword in ['Monthly', 'Annual', 'Value Weight', 'Equal Weight', 'Average']):
+            # Save previous section if exists
+            if current_section is not None and section_start is not None:
+                section_df = parse_section(lines[section_start:i], section_label)
+                if section_df is not None and not section_df.empty:
+                    sections[section_label] = section_df
+                    print(f"      Found section: {section_label} ({section_df.shape[0]} rows)")
+            
+            # Start new section
+            section_label = stripped.replace(',', ' ').strip()
+            section_start = i
+            current_section = []
+        
+        # If we haven't found a section label yet, look for the first data section
+        if section_label is None and stripped.startswith(',') and stripped.count(',') > 2:
+            section_label = "Value Weighted Returns -- Monthly"  # Default first section
+            section_start = 0
+    
+    # Don't forget the last section
+    if current_section is not None and section_start is not None:
+        section_df = parse_section(lines[section_start:], section_label)
+        if section_df is not None and not section_df.empty:
+            sections[section_label] = section_df
+            print(f"      Found section: {section_label} ({section_df.shape[0]} rows)")
+    
+    return sections
+
+
 def parse_famafrench_csv(csv_path):
     """
     Parse a Fama-French CSV file
@@ -158,25 +258,41 @@ def process_zip_file(zip_path):
         print(f"  Processing {data_file.name}...")
         
         if data_file.suffix.lower() == '.csv':
-            df = parse_famafrench_csv(data_file)
+            # Try parsing as multi-section file first
+            sections = parse_famafrench_csv_sections(data_file)
+            
+            if sections:
+                # Multiple sections found - save each separately
+                zip_stem = zip_path.stem.replace('_CSV', '').replace('_TXT', '')
+                for section_label, df in sections.items():
+                    # Create safe filename from section label
+                    safe_label = section_label.replace(' ', '_').replace('--', '_').replace(',', '')
+                    safe_label = ''.join(c for c in safe_label if c.isalnum() or c in ('_', '-'))[:50]
+                    output_filename = f"{zip_stem}_{data_file.stem}_{safe_label}.csv"
+                    output_path = OUTPUT_DIR / output_filename
+                    
+                    df.to_csv(output_path)
+                    print(f"    ✓ Saved section '{section_label}' to {output_path}")
+                    print(f"      Shape: {df.shape}, Date range: {df.index.min()} to {df.index.max()}")
+                    
+                    results[f"{data_file.name}_{section_label}"] = df
+            else:
+                # Fall back to single-section parsing
+                df = parse_famafrench_csv(data_file)
+                if df is not None and not df.empty:
+                    zip_stem = zip_path.stem.replace('_CSV', '').replace('_TXT', '')
+                    output_filename = f"{zip_stem}_{data_file.stem}.csv"
+                    output_path = OUTPUT_DIR / output_filename
+                    
+                    df.to_csv(output_path)
+                    print(f"    ✓ Saved to {output_path}")
+                    print(f"      Shape: {df.shape}, Date range: {df.index.min()} to {df.index.max()}")
+                    
+                    results[data_file.name] = df
         else:
             # For TXT files, use the old method (though we expect CSV)
             print(f"    Note: Found TXT file, but expecting CSV")
             continue
-        
-        if df is not None and not df.empty:
-            # Create output filename
-            zip_stem = zip_path.stem.replace('_CSV', '').replace('_TXT', '')
-            output_filename = f"{zip_stem}_{data_file.stem}.csv"
-            output_path = OUTPUT_DIR / output_filename
-            
-            df.to_csv(output_path)
-            print(f"    ✓ Saved to {output_path}")
-            print(f"      Shape: {df.shape}, Date range: {df.index.min()} to {df.index.max()}")
-            
-            results[data_file.name] = df
-        else:
-            print(f"    ⚠ Could not process {data_file.name}")
     
     return results
 
