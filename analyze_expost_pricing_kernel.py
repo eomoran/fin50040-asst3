@@ -184,7 +184,10 @@ def analyze_pricing_kernel():
                 })
                 
                 print(f"\n{portfolio_type.upper()} Portfolios ({start_year}-{end_year}):")
-                print(f"  MSMP return (annualized): {msmp_return:.4f}")
+                # msmp_return from find_msmp is now gross return E[R]
+                msmp_net = msmp_return - 1
+                print(f"  MSMP return (gross, annualized): {msmp_return:.4f}")
+                print(f"  MSMP return (net, annualized): {msmp_net:.4f}")
                 print(f"  MSMP volatility (annualized): {msmp_vol:.4f}")
                 print(f"  E[R_msmp] (gross): {E_R:.6f}")
                 print(f"  E[R_msmp^2]: {E_R2:.6f}")
