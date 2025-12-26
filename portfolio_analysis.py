@@ -49,7 +49,19 @@ def load_portfolio_data(portfolio_type="size", start_year=1927, end_year=2013):
     if not files:
         raise FileNotFoundError(f"No file found matching {file_pattern}")
     
-    df = pd.read_csv(files[0], index_col=0, parse_dates=True)
+    df = pd.read_csv(files[0], index_col=0)
+    
+    # Parse dates - Fama-French uses YYYYMM format
+    if df.index.dtype == 'object' or not isinstance(df.index, pd.DatetimeIndex):
+        # Try to parse as YYYYMM format
+        try:
+            df.index = pd.to_datetime(df.index.astype(str), format='%Y%m', errors='coerce')
+        except:
+            # If that fails, try standard parsing
+            df.index = pd.to_datetime(df.index, errors='coerce')
+    
+    # Drop any rows with NaT dates
+    df = df[df.index.notna()]
     
     # Filter date range
     start_date = pd.Timestamp(f"{start_year}-01-01")
@@ -70,7 +82,19 @@ def load_factors(start_year=1927, end_year=2013):
     if not files:
         raise FileNotFoundError("No factors file found")
     
-    df = pd.read_csv(files[0], index_col=0, parse_dates=True)
+    df = pd.read_csv(files[0], index_col=0)
+    
+    # Parse dates - Fama-French uses YYYYMM format
+    if df.index.dtype == 'object' or not isinstance(df.index, pd.DatetimeIndex):
+        # Try to parse as YYYYMM format
+        try:
+            df.index = pd.to_datetime(df.index.astype(str), format='%Y%m', errors='coerce')
+        except:
+            # If that fails, try standard parsing
+            df.index = pd.to_datetime(df.index, errors='coerce')
+    
+    # Drop any rows with NaT dates
+    df = df[df.index.notna()]
     
     # Filter date range
     start_date = pd.Timestamp(f"{start_year}-01-01")
