@@ -84,15 +84,17 @@ def verify_pricing_properties(m, returns):
     m : pd.Series
         Pricing kernel (indexed by time)
     returns : pd.DataFrame
-        Portfolio returns (time x portfolios)
+        Portfolio gross returns (R = 1 + r, time x portfolios)
+        Note: returns are already in gross return format from processed files
     
     Returns:
     --------
     pricing_errors : pd.Series
         E[m * R_i] - 1 for each portfolio (should be close to 0)
     """
-    # Convert returns to gross returns
-    R = 1 + returns
+    # Returns are already gross returns (R = 1 + r) from processed files
+    # No conversion needed
+    R = returns
     
     # Align m with returns index
     m_aligned = m.reindex(R.index)
