@@ -215,17 +215,10 @@ def load_factors(start_year=1927, end_year=2013, prefer_annual=False):
         end_date = pd.Timestamp(f"{end_year}-12-31")
         df = df[(df.index >= start_date) & (df.index <= end_date)]
     
-    # Convert from percentage to decimal if needed
-    if df.abs().max().max() > 1:
-        df = df / 100.0
-    
-    # Convert RF (risk-free rate) to gross return: R_f = 1 + r_f
-    # Note: Factor columns like 'Mkt-RF', 'SMB', 'HML' are excess returns (r - r_f),
-    #       which are the same whether we use gross or net: R_m - R_f = (1 + r_m) - (1 + r_f) = r_m - r_f
-    #       So we keep excess return factors as-is
-    if 'RF' in df.columns:
-        df['RF'] = 1 + df['RF']  # Convert RF to gross return R_f
-    
+    # Processed files already contain:
+    # - RF in gross return form (R_f = 1 + r_f) for factor files
+    # - Excess return factors (Mkt-RF, SMB, HML) as excess returns (same in gross or net)
+    # No conversion needed - data was converted during processing
     return df
 
 
