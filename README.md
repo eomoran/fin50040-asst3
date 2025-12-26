@@ -79,9 +79,9 @@ To change the second portfolio sort, edit `download_famafrench_data.py` and modi
 ## Results Comparison
 
 The results for the 1927-2013 subsample should be compared with the professor's original solution (see `Assignment 3 - Day 1 MPT CAPM.xlsx`). Any differences are likely due to:
-- Dataset updates (Fama-French data extended to 2024)
+- **Updates to underlying Fama-French data**: The historical data for the 1927-2013 period has been revised/updated by Fama-French since the original assignment was created (not just extended to 2024)
+- Dataset extension: Fama-French data has been extended to 2024
 - Minor differences in data processing or rounding
-- Updates to the underlying Fama-French factor data
 
 See `PTAP 50040 Assignment.md` for the complete task list.
 
