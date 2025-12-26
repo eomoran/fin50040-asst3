@@ -443,7 +443,7 @@ def find_optimal_crra_portfolio(mu, Sigma, rra=4):
     return w_opt, opt_return, opt_vol
 
 
-def find_zero_beta_portfolio(mu, Sigma, w_m):
+def find_zero_beta_portfolio(mu, Sigma, w_m, on_frontier=True):
     """
     Find Zero-β portfolio for a given portfolio w_m using gross returns
     
@@ -451,6 +451,9 @@ def find_zero_beta_portfolio(mu, Sigma, w_m):
     - β_z = Cov(R_z, R_m) / Var(R_m) = 0
     - This means Cov(R_z, R_m) = 0
     - w_z'Σ_R w_m = 0
+    
+    If on_frontier=True, the zero-beta portfolio is constrained to lie on
+    the efficient frontier (minimum variance for its return level).
     
     Parameters:
     -----------
@@ -460,6 +463,9 @@ def find_zero_beta_portfolio(mu, Sigma, w_m):
         Covariance matrix of gross returns (Cov(R))
     w_m : np.array
         Market/optimal portfolio weights
+    on_frontier : bool
+        If True, find zero-beta portfolio on the efficient frontier.
+        If False, just minimize variance subject to zero covariance.
     
     Returns:
     --------
@@ -472,9 +478,84 @@ def find_zero_beta_portfolio(mu, Sigma, w_m):
     """
     n = len(mu)
     
-    # Minimize variance subject to:
+    if on_frontier:
+        # Find zero-beta portfolio ON the efficient frontier
+        # This means: for each return level, find minimum variance portfolio
+        # with that return that also has zero covariance with w_m
+        
+        # Get range of returns on frontier
+        ones = np.ones(n)
+        try:
+            inv_Sigma = np.linalg.inv(Sigma)
+        except np.linalg.LinAlgError:
+            inv_Sigma = np.linalg.pinv(Sigma)
+        
+        w_minvar = inv_Sigma @ ones / (ones.T @ inv_Sigma @ ones)
+        mu_minvar = mu.T @ w_minvar
+        mu_max = mu.max()
+        mu_min = mu.min()  # Minimum return (for inefficient part of frontier)
+        
+        # Search along BOTH parts of frontier (efficient and inefficient)
+        # The inefficient part has returns below MVP but is still on the frontier
+        # Search from mu_min to mu_max to cover both limbs
+        target_returns = np.linspace(mu_min, mu_max, 300)
+        
+        best_w = None
+        best_cov = np.inf
+        best_return = None
+        best_vol = None
+        
+        for target_return in target_returns:
+            # Minimize variance subject to:
+            # 1. Budget constraint: sum(w) = 1
+            # 2. Return constraint: mu'w = target_return
+            # 3. Zero beta: w'Σw_m = 0
+            
+            def objective(w):
+                return w.T @ Sigma @ w
+            
+            constraints = [
+                {'type': 'eq', 'fun': lambda w: np.sum(w) - 1},
+                {'type': 'eq', 'fun': lambda w: mu.T @ w - target_return},
+                {'type': 'eq', 'fun': lambda w: w.T @ Sigma @ w_m}
+            ]
+            
+            bounds = [(-1, 1) for _ in range(n)]
+            w0 = np.ones(n) / n
+            
+            try:
+                result = minimize(objective, w0, method='SLSQP',
+                                 bounds=bounds, constraints=constraints,
+                                 options={'maxiter': 1000, 'ftol': 1e-9})
+                
+                if result.success:
+                    # Check constraints
+                    budget_check = abs(np.sum(result.x) - 1)
+                    return_check = abs(mu.T @ result.x - target_return)
+                    cov_check = abs(result.x.T @ Sigma @ w_m)
+                    
+                    if budget_check < 1e-5 and return_check < 1e-5 and cov_check < 1e-4:
+                        if cov_check < best_cov:
+                            best_w = result.x
+                            best_cov = cov_check
+                            best_return = mu.T @ result.x
+                            best_vol = np.sqrt(result.x.T @ Sigma @ result.x)
+            except:
+                continue
+        
+        if best_w is not None:
+            w_z = best_w
+            z_return = best_return
+            z_vol = best_vol
+            zero_beta_check = abs(w_z.T @ Sigma @ w_m)
+            if zero_beta_check > 1e-4:
+                print(f"        Warning: Zero-beta constraint not perfectly satisfied (error: {zero_beta_check:.2e})")
+            return w_z, z_return, z_vol
+    
+    # Fallback: Minimize variance subject to:
     # 1. Budget constraint: sum(w) = 1
     # 2. Zero beta: w'Σw_m = 0
+    # (Not necessarily on frontier)
     
     def objective(w):
         return w.T @ Sigma @ w
