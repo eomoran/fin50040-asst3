@@ -487,17 +487,105 @@ def find_zero_beta_portfolio(mu, Sigma, w_m):
     ]
     
     bounds = [(-1, 1) for _ in range(n)]
-    w0 = np.ones(n) / n
     
-    result = minimize(objective, w0, method='SLSQP',
-                     bounds=bounds, constraints=constraints)
+    # Try multiple initial guesses
+    np.random.seed(42)  # For reproducibility
+    initial_guesses = [
+        np.ones(n) / n,  # Equal weights
+    ]
     
-    if not result.success:
-        raise ValueError("Failed to find zero-β portfolio")
+    # Try negative of market portfolio (normalized) if it sums to something reasonable
+    if np.abs(np.sum(w_m)) > 1e-10:
+        w_neg = -w_m.copy()
+        w_neg = w_neg / np.sum(w_neg)  # Normalize to sum to 1
+        # Check if it's within bounds
+        if np.all(w_neg >= -1) and np.all(w_neg <= 1):
+            initial_guesses.append(w_neg)
     
-    w_z = result.x
+    # Add a few random initial guesses
+    for _ in range(3):
+        w_rand = np.random.rand(n)
+        w_rand = w_rand / np.sum(w_rand)  # Normalize
+        initial_guesses.append(w_rand)
+    
+    best_result = None
+    best_value = np.inf
+    
+    for w0 in initial_guesses:
+        try:
+            result = minimize(objective, w0, method='SLSQP',
+                             bounds=bounds, constraints=constraints,
+                             options={'maxiter': 1000, 'ftol': 1e-9})
+            
+            if result.success:
+                # Check if constraints are satisfied
+                budget_constraint = abs(np.sum(result.x) - 1)
+                zero_beta_constraint = abs(result.x.T @ Sigma @ w_m)
+                
+                if budget_constraint < 1e-6 and zero_beta_constraint < 1e-6:
+                    if result.fun < best_value:
+                        best_result = result
+                        best_value = result.fun
+        except:
+            continue
+    
+    # If still no solution, try with relaxed constraints (allow small non-zero beta)
+    if best_result is None:
+        # Try with approximate zero-beta constraint (allow small tolerance)
+        constraints_relaxed = [
+            {'type': 'eq', 'fun': lambda w: np.sum(w) - 1},
+            {'type': 'eq', 'fun': lambda w: w.T @ Sigma @ w_m, 'tol': 1e-6}
+        ]
+        
+        for w0 in initial_guesses:
+            try:
+                result = minimize(objective, w0, method='SLSQP',
+                                 bounds=bounds, constraints=constraints_relaxed,
+                                 options={'maxiter': 1000, 'ftol': 1e-9})
+                
+                if result.success:
+                    budget_constraint = abs(np.sum(result.x) - 1)
+                    zero_beta_constraint = abs(result.x.T @ Sigma @ w_m)
+                    
+                    if budget_constraint < 1e-5 and zero_beta_constraint < 1e-4:
+                        if result.fun < best_value:
+                            best_result = result
+                            best_value = result.fun
+            except:
+                continue
+    
+    if best_result is None:
+        # Last resort: try with wider bounds
+        bounds_wide = [(-2, 2) for _ in range(n)]
+        for w0 in initial_guesses:
+            try:
+                result = minimize(objective, w0, method='SLSQP',
+                                 bounds=bounds_wide, constraints=constraints,
+                                 options={'maxiter': 2000, 'ftol': 1e-9})
+                
+                if result.success:
+                    budget_constraint = abs(np.sum(result.x) - 1)
+                    zero_beta_constraint = abs(result.x.T @ Sigma @ w_m)
+                    
+                    if budget_constraint < 1e-5 and zero_beta_constraint < 1e-4:
+                        best_result = result
+                        break
+            except:
+                continue
+    
+    if best_result is None:
+        raise ValueError(f"Failed to find zero-β portfolio. "
+                        f"Optimization may be infeasible with current constraints. "
+                        f"Consider checking if the covariance matrix is well-conditioned.")
+    
+    w_z = best_result.x
     z_return = mu.T @ w_z
     z_vol = np.sqrt(w_z.T @ Sigma @ w_z)
+    
+    # Verify constraints
+    zero_beta_check = abs(w_z.T @ Sigma @ w_m)
+    if zero_beta_check > 1e-4:
+        print(f"        Warning: Zero-beta constraint not perfectly satisfied (error: {zero_beta_check:.2e})")
     
     return w_z, z_return, z_vol
 
