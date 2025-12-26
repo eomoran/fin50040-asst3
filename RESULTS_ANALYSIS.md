@@ -88,28 +88,31 @@ This document summarizes the key findings from the portfolio analysis for Assign
 #### Risk-Free CAPM (Non-Recentred)
 
 **1927-2013:**
-- Mean alpha: 0.0090
-- Standard deviation: 0.0089
-- Observations: 87 years
+- Mean alpha: **0.0110** (1.10% annual)
+- Standard deviation: 0.0099
+- Observations: 52 portfolio-period combinations
 
 **1927-2024:**
-- Mean alpha: 0.0089
-- Standard deviation: 0.0089
-- Observations: 98 years
+- Mean alpha: **0.0069** (0.69% annual)
+- Standard deviation: 0.0074
+- Observations: 52 portfolio-period combinations
 
-**Observation**: Adding 11 more years (2014-2024) has minimal impact on average alpha, suggesting consistent patterns over time.
+**Observation**: The 1927-2024 period shows **lower average alpha** (0.69% vs 1.10%), suggesting that the more recent period (2014-2024) may have lower alphas. This could indicate:
+- Market efficiency improvements over time
+- Changes in factor loadings or risk premiums
+- Different market conditions in recent years
 
 #### Zero-Beta CAPM (Non-Recentred)
 
 **1927-2013:**
-- Mean alpha: -0.0065
-- Standard deviation: 0.0036
+- Mean alpha: **-0.0071** (-0.71% annual)
+- Standard deviation: 0.0033
 
 **1927-2024:**
-- Mean alpha: -0.0065
-- Standard deviation: 0.0036
+- Mean alpha: **-0.0058** (-0.58% annual)
+- Standard deviation: 0.0038
 
-**Observation**: Similar stability across periods for zero-beta CAPM alphas.
+**Observation**: Zero-beta CAPM alphas are **less negative** in the full period (-0.58% vs -0.71%), suggesting some improvement, though still negative on average.
 
 ### 4. Portfolio Type Comparison
 

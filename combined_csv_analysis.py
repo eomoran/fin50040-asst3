@@ -138,13 +138,14 @@ def analyze_by_period():
     zb_non_recentred = zb_df[zb_df['recentred'] == False]
     
     print('\n=== Risk-Free CAPM ===')
+    # Handle both string and numeric year columns
     period_2013 = rf_non_recentred[
-        (rf_non_recentred['start_year'] == '1927') &
-        (rf_non_recentred['end_year'] == '2013')
+        (rf_non_recentred['start_year'].astype(str) == '1927') &
+        (rf_non_recentred['end_year'].astype(str) == '2013')
     ]
     period_2024 = rf_non_recentred[
-        (rf_non_recentred['start_year'] == '1927') &
-        (rf_non_recentred['end_year'] == '2024')
+        (rf_non_recentred['start_year'].astype(str) == '1927') &
+        (rf_non_recentred['end_year'].astype(str) == '2024')
     ]
     
     print('\n1927-2013:')
@@ -165,12 +166,12 @@ def analyze_by_period():
     
     print('\n=== Zero-Beta CAPM ===')
     zb_period_2013 = zb_non_recentred[
-        (zb_non_recentred['start_year'] == '1927') &
-        (zb_non_recentred['end_year'] == '2013')
+        (zb_non_recentred['start_year'].astype(str) == '1927') &
+        (zb_non_recentred['end_year'].astype(str) == '2013')
     ]
     zb_period_2024 = zb_non_recentred[
-        (zb_non_recentred['start_year'] == '1927') &
-        (zb_non_recentred['end_year'] == '2024')
+        (zb_non_recentred['start_year'].astype(str) == '1927') &
+        (zb_non_recentred['end_year'].astype(str) == '2024')
     ]
     
     print('\n1927-2013:')
