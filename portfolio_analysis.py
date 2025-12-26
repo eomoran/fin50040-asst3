@@ -106,7 +106,8 @@ def load_factors(start_year=1927, end_year=2013, prefer_annual=False):
     end_year : int
         End year for data
     prefer_annual : bool
-        If True, prefer annual factors (for annual portfolio returns)
+        If True, prefer annual factors (for annual portfolio returns).
+        If annual factors don't cover the full period, will use monthly and aggregate.
     """
     files = list(DATA_DIR.glob("*Factors*.csv"))
     if not files:
@@ -114,47 +115,88 @@ def load_factors(start_year=1927, end_year=2013, prefer_annual=False):
     
     # Prefer annual factors if requested
     if prefer_annual:
+        # Prefer US factors (F-F_Research_Data) over Asia Pacific
         annual_files = [f for f in files if 'Annual' in f.name]
-        if annual_files:
-            file_to_use = annual_files[0]
-            print(f"  Using annual factors: {file_to_use.name}")
-        else:
-            file_to_use = files[0]
-            print(f"  Using: {file_to_use.name} (annual factors not found)")
+        us_annual_files = [f for f in annual_files if 'F-F_Research_Data' in f.name or '5_Factors_2x3' in f.name]
+        
+        use_annual = False
+        if us_annual_files:
+            file_to_use = us_annual_files[0]
+            print(f"  Trying annual factors: {file_to_use.name}")
+            df = pd.read_csv(file_to_use, index_col=0)
+            
+            # Parse dates
+            if df.index.dtype == 'object' or not isinstance(df.index, pd.DatetimeIndex):
+                df.index = pd.to_datetime(df.index, errors='coerce')
+            df = df[df.index.notna()]
+            
+            # Check if annual factors cover the full period
+            start_date = pd.Timestamp(f"{start_year}-01-01")
+            end_date = pd.Timestamp(f"{end_year}-12-31")
+            df_filtered = df[(df.index >= start_date) & (df.index <= end_date)]
+            
+            if len(df_filtered) > 0 and df.index.min() <= start_date:
+                # Annual factors cover the period, use them
+                df = df_filtered
+                print(f"  Using annual factors: {file_to_use.name}")
+                use_annual = True
+        
+        if not use_annual:
+            # Annual factors don't cover the period or don't exist, use monthly and aggregate
+            if not use_annual and us_annual_files:
+                print(f"  Annual factors only cover {df.index.min().year}-{df.index.max().year}, using monthly factors and aggregating")
+            
+            # Use monthly factors and aggregate to annual
+            monthly_files = [f for f in files if 'Annual' not in f.name]
+            us_monthly_files = [f for f in monthly_files if 'F-F_Research_Data' in f.name or '5_Factors_2x3' in f.name]
+            if us_monthly_files:
+                file_to_use = us_monthly_files[0]
+            elif monthly_files:
+                file_to_use = monthly_files[0]
+            else:
+                file_to_use = files[0]
+            
+            print(f"  Using monthly factors: {file_to_use.name}")
+            df = pd.read_csv(file_to_use, index_col=0)
+            
+            # Parse dates (YYYYMM format for monthly)
+            if df.index.dtype == 'object' or not isinstance(df.index, pd.DatetimeIndex):
+                df.index = pd.to_datetime(df.index.astype(str), format='%Y%m', errors='coerce')
+            df = df[df.index.notna()]
+            
+            # Filter date range
+            start_date = pd.Timestamp(f"{start_year}-01-01")
+            end_date = pd.Timestamp(f"{end_year}-12-31")
+            df = df[(df.index >= start_date) & (df.index <= end_date)]
+            
+            # Aggregate monthly to annual: compound returns
+            df_annual = df.groupby(df.index.year).apply(lambda x: (1 + x).prod() - 1)
+            df_annual.index = pd.to_datetime(df_annual.index.astype(str) + '-01-01', format='%Y-%m-%d')
+            df = df_annual
+            
+            print(f"  Aggregated {len(df)} annual observations from monthly data")
     else:
-        # Prefer monthly (non-annual) factors
+        # Prefer monthly (non-annual) factors, and US over Asia Pacific
         monthly_files = [f for f in files if 'Annual' not in f.name]
-        if monthly_files:
+        us_monthly_files = [f for f in monthly_files if 'F-F_Research_Data' in f.name or '5_Factors_2x3' in f.name]
+        if us_monthly_files:
+            file_to_use = us_monthly_files[0]
+        elif monthly_files:
             file_to_use = monthly_files[0]
         else:
             file_to_use = files[0]
-    
-    df = pd.read_csv(file_to_use, index_col=0)
-    
-    # Parse dates - Fama-French uses YYYYMM format (monthly) or YYYY format (annual)
-    if df.index.dtype == 'object' or not isinstance(df.index, pd.DatetimeIndex):
-        # Try to parse as YYYYMM format first (monthly)
-        try:
-            sample = str(df.index[0]) if len(df) > 0 else ''
-            if len(sample) == 6 and sample.isdigit():
-                df.index = pd.to_datetime(df.index.astype(str), format='%Y%m', errors='coerce')
-            elif len(sample) == 4 and sample.isdigit():
-                # Annual data - YYYY format
-                df.index = pd.to_datetime(df.index.astype(str) + '-01-01', format='%Y-%m-%d', errors='coerce')
-            else:
-                # Try standard parsing
-                df.index = pd.to_datetime(df.index, errors='coerce')
-        except:
-            # If that fails, try standard parsing
-            df.index = pd.to_datetime(df.index, errors='coerce')
-    
-    # Drop any rows with NaT dates
-    df = df[df.index.notna()]
-    
-    # Filter date range
-    start_date = pd.Timestamp(f"{start_year}-01-01")
-    end_date = pd.Timestamp(f"{end_year}-12-31")
-    df = df[(df.index >= start_date) & (df.index <= end_date)]
+        
+        df = pd.read_csv(file_to_use, index_col=0)
+        
+        # Parse dates (YYYYMM format for monthly)
+        if df.index.dtype == 'object' or not isinstance(df.index, pd.DatetimeIndex):
+            df.index = pd.to_datetime(df.index.astype(str), format='%Y%m', errors='coerce')
+        df = df[df.index.notna()]
+        
+        # Filter date range
+        start_date = pd.Timestamp(f"{start_year}-01-01")
+        end_date = pd.Timestamp(f"{end_year}-12-31")
+        df = df[(df.index >= start_date) & (df.index <= end_date)]
     
     # Convert from percentage to decimal if needed
     if df.abs().max().max() > 1:
@@ -600,9 +642,25 @@ def main():
             is_annual = len(files) > 0
         
         factors = load_factors(start_year, end_year, prefer_annual=is_annual)
+        
+        # Check if we have data after filtering
+        if len(returns) == 0:
+            raise ValueError(f"No portfolio data found for period {start_year}-{end_year}")
+        if len(factors) == 0:
+            raise ValueError(f"No factor data found for period {start_year}-{end_year}")
+        
         print(f"  Loaded {len(returns.columns)} portfolios")
-        print(f"  Time period: {returns.index[0].date()} to {returns.index[-1].date()}")
+        print(f"  Portfolio time period: {returns.index[0].date()} to {returns.index[-1].date()}")
+        print(f"  Factor time period: {factors.index[0].date()} to {factors.index[-1].date()}")
         print(f"  Data frequency: {'Annual' if is_annual else 'Monthly'}")
+        
+        # Check overlap
+        common_dates = returns.index.intersection(factors.index)
+        if len(common_dates) == 0:
+            raise ValueError(f"No overlapping dates between portfolios and factors. "
+                           f"Portfolio range: {returns.index[0]} to {returns.index[-1]}, "
+                           f"Factor range: {factors.index[0]} to {factors.index[-1]}")
+        print(f"  Common dates: {len(common_dates)} observations")
     except Exception as e:
         print(f"Error loading data: {e}")
         import traceback
