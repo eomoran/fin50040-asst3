@@ -131,11 +131,19 @@ def load_factors(start_year=1927, end_year=2013, prefer_annual=False):
     
     df = pd.read_csv(file_to_use, index_col=0)
     
-    # Parse dates - Fama-French uses YYYYMM format
+    # Parse dates - Fama-French uses YYYYMM format (monthly) or YYYY format (annual)
     if df.index.dtype == 'object' or not isinstance(df.index, pd.DatetimeIndex):
-        # Try to parse as YYYYMM format
+        # Try to parse as YYYYMM format first (monthly)
         try:
-            df.index = pd.to_datetime(df.index.astype(str), format='%Y%m', errors='coerce')
+            sample = str(df.index[0]) if len(df) > 0 else ''
+            if len(sample) == 6 and sample.isdigit():
+                df.index = pd.to_datetime(df.index.astype(str), format='%Y%m', errors='coerce')
+            elif len(sample) == 4 and sample.isdigit():
+                # Annual data - YYYY format
+                df.index = pd.to_datetime(df.index.astype(str) + '-01-01', format='%Y-%m-%d', errors='coerce')
+            else:
+                # Try standard parsing
+                df.index = pd.to_datetime(df.index, errors='coerce')
         except:
             # If that fails, try standard parsing
             df.index = pd.to_datetime(df.index, errors='coerce')
