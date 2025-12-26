@@ -28,12 +28,15 @@ All analysis results, interpretations, and conclusions are my own work.
    - Fama-French 3-Factor and 5-Factor Models
    - Risk-free rate data (included in factors file)
 
-3. **Process the downloaded data:**
-   ```bash
-   python process_famafrench_data.py
-   ```
-   
-   This will extract ZIP files and convert them to CSV format for easier analysis.
+        3. **Process the downloaded data:**
+           ```bash
+           python process_famafrench_data.py
+           ```
+           
+           This will extract ZIP files and convert them to CSV format for easier analysis.
+           **Note**: Portfolio returns are automatically converted to gross returns (R = 1 + r)
+           during processing, and RF is converted to gross return (R_f = 1 + r_f) in factor files.
+           All analysis scripts work with gross returns throughout.
 
 ## Data Files
 
