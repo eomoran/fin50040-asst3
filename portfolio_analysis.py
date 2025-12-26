@@ -655,6 +655,7 @@ def find_zero_beta_portfolio(mu, Sigma, w_m, on_frontier=True):
                 return False
             
             # If not on frontier, re-optimize to ensure it's on the frontier
+            # This ensures ZBP is actually on the investment opportunity set (inefficient limb)
             if not verify_on_frontier(w_z, z_return):
                 # Re-optimize with the found return as target to ensure it's on frontier
                 def objective(w):
@@ -667,19 +668,44 @@ def find_zero_beta_portfolio(mu, Sigma, w_m, on_frontier=True):
                 ]
                 bounds = [(-1, 1) for _ in range(n)]
                 
-                # Try with the current solution as initial guess
-                result = minimize(objective, w_z.copy(), method='SLSQP',
-                                 bounds=bounds, constraints=constraints,
-                                 options={'maxiter': 2000, 'ftol': 1e-9})
+                # Try multiple initial guesses
+                initial_guesses = [w_z.copy()]
+                if z_return < mu_minvar:
+                    # For inefficient part, try negative MVP
+                    w_neg = -w_minvar.copy()
+                    if np.abs(np.sum(w_neg)) > 1e-10:
+                        w_neg = w_neg / np.sum(w_neg)
+                        if np.all(w_neg >= -1) and np.all(w_neg <= 1):
+                            initial_guesses.append(w_neg)
+                else:
+                    initial_guesses.append(w_minvar.copy())
+                initial_guesses.append(np.ones(n) / n)
                 
-                if result.success:
-                    budget_check = abs(np.sum(result.x) - 1)
-                    return_check = abs(mu.T @ result.x - z_return)
-                    cov_check = abs(result.x.T @ Sigma @ w_m)
-                    
-                    if budget_check < 1e-5 and return_check < 1e-5 and cov_check < 1e-3:
-                        w_z = result.x
-                        z_vol = np.sqrt(w_z.T @ Sigma @ w_z)
+                best_result = None
+                best_cov = np.inf
+                
+                for w0 in initial_guesses:
+                    try:
+                        result = minimize(objective, w0, method='SLSQP',
+                                         bounds=bounds, constraints=constraints,
+                                         options={'maxiter': 2000, 'ftol': 1e-9})
+                        
+                        if result.success:
+                            budget_check = abs(np.sum(result.x) - 1)
+                            return_check = abs(mu.T @ result.x - z_return)
+                            cov_check = abs(result.x.T @ Sigma @ w_m)
+                            
+                            if budget_check < 1e-5 and return_check < 1e-5 and cov_check < 1e-3:
+                                if cov_check < best_cov:
+                                    best_result = result
+                                    best_cov = cov_check
+                    except:
+                        continue
+                
+                if best_result is not None:
+                    w_z = best_result.x
+                    z_vol = np.sqrt(w_z.T @ Sigma @ w_z)
+                    z_return = mu.T @ w_z  # Update return in case it changed slightly
             
             zero_beta_check = abs(w_z.T @ Sigma @ w_m)
             if zero_beta_check > 1e-4:
