@@ -640,6 +640,10 @@ def exclude_small_caps(returns, portfolio_type="size"):
     For size portfolios, small caps are typically the smallest deciles.
     Common small cap portfolio names: 'Lo 10', '2-Dec', 'Lo 20', 'Lo 30', '<= 0'
     
+    Note: BE-ME portfolios are sorted only by book-to-market ratio, not by size.
+    This function only applies to size portfolios. For double-sorted portfolios
+    (size x value), a different approach would be needed.
+    
     Parameters:
     -----------
     returns : pd.DataFrame
@@ -653,7 +657,9 @@ def exclude_small_caps(returns, portfolio_type="size"):
         Returns with small caps excluded
     """
     if portfolio_type != "size":
-        # For non-size portfolios, return as-is (no small caps to exclude)
+        # BE-ME portfolios are sorted only by book-to-market, not by size
+        # So there are no "small caps" to exclude in value portfolios
+        print(f"  Note: {portfolio_type} portfolios are not sorted by size, so --exclude-small-caps has no effect")
         return returns
     
     # Small cap portfolio names (typically smallest deciles)
