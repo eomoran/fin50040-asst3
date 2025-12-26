@@ -72,8 +72,8 @@ def plot_efficient_frontier(portfolio_type="size", start_year=1927, end_year=201
     # Compute moments
     mu, Sigma, portfolio_names = compute_moments(returns)
     
-    # Construct investment opportunity set (both efficient and inefficient limbs)
-    frontier = construct_mv_frontier(mu, Sigma, num_portfolios=200)  # More points for smoother curve
+    # Construct frontier
+    frontier = construct_mv_frontier(mu, Sigma, num_portfolios=150)  # More points for smoother curve
     
     # Sort frontier by volatility for proper plotting (U-shape)
     sort_idx = np.argsort(frontier['volatilities'])
@@ -154,8 +154,8 @@ def plot_efficient_frontier(portfolio_type="size", start_year=1927, end_year=201
         title_parts.append('(No Small Caps)')
     if recentre_flag:
         title_parts.append('(Recentred)')
-                ax.set_title('Investment Opportunity Set with Key Portfolios\n' + ' '.join(title_parts), 
-                            fontsize=14, fontweight='bold')
+    ax.set_title('Investment Opportunity Set with Key Portfolios\n' + ' '.join(title_parts), 
+                fontsize=14, fontweight='bold')
     
     # Grid
     ax.grid(True, alpha=0.3, linestyle='--')

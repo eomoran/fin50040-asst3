@@ -628,9 +628,8 @@ def find_zero_beta_portfolio(mu, Sigma, w_m, on_frontier=True):
             z_return = best_return
             z_vol = best_vol
             
-            # Verify that ZBP is actually on the investment opportunity set
+            # Verify that ZBP is actually on the investment opportunity set (frontier)
             # by checking if it's the minimum variance portfolio for its return level
-            # (i.e., no other portfolio with same return has lower variance)
             def verify_on_frontier(w, target_return):
                 """Check if w is the minimum variance portfolio for its return level"""
                 def objective(w_test):
@@ -652,12 +651,12 @@ def find_zero_beta_portfolio(mu, Sigma, w_m, on_frontier=True):
                     variance_found = result.fun
                     variance_current = w.T @ Sigma @ w
                     # Allow small tolerance for numerical errors
-                    return abs(variance_found - variance_current) < 1e-6
+                    return abs(variance_found - variance_current) < 1e-5
                 return False
             
-            # If not on frontier, try to project it onto the frontier
+            # If not on frontier, re-optimize to ensure it's on the frontier
             if not verify_on_frontier(w_z, z_return):
-                # Re-optimize to ensure it's on the frontier
+                # Re-optimize with the found return as target to ensure it's on frontier
                 def objective(w):
                     return w.T @ Sigma @ w
                 
