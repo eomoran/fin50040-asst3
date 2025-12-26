@@ -225,21 +225,12 @@ def load_factors(start_year=1927, end_year=2013, prefer_annual=False):
     if df.abs().max().max() > 1:
         df = df / 100.0
     
-    # Convert net returns (r) to gross returns (R = 1 + r) for all columns
-    # Note: RF (risk-free rate) is converted to gross return R_f = 1 + r_f
+    # Convert RF (risk-free rate) to gross return: R_f = 1 + r_f
     # Note: Factor columns like 'Mkt-RF', 'SMB', 'HML' are excess returns (r - r_f),
-    #       so we convert them to gross excess: (r - r_f) + 1 = R - R_f + 1
-    #       Actually, for excess returns, we keep them as-is since they're already differences
-    #       But for consistency with portfolio returns, we convert RF to gross
+    #       which are the same whether we use gross or net: R_m - R_f = (1 + r_m) - (1 + r_f) = r_m - r_f
+    #       So we keep excess return factors as-is
     if 'RF' in df.columns:
-        df['RF'] = 1 + df['RF']  # Convert RF to gross return
-    
-    # For factor columns (excess returns), we don't convert to gross since they're already differences
-    # But we need to be consistent - actually, let's convert everything to gross
-    # For excess returns like Mkt-RF: if it's r_m - r_f, then gross would be (1 + r_m) - (1 + r_f) = R_m - R_f
-    # But that's still an excess return, just in gross terms
-    # Actually, let's keep excess returns as excess returns (they're differences, not levels)
-    # Only convert RF to gross, and keep other factors as excess returns
+        df['RF'] = 1 + df['RF']  # Convert RF to gross return R_f
     
     return df
 
