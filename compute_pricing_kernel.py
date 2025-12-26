@@ -151,14 +151,8 @@ def load_portfolio_returns(portfolio_type, start_year, end_year):
     # Convert to numeric, coercing errors
     df = df.apply(pd.to_numeric, errors='coerce')
     
-    # Divide by 100 if values seem to be in percentage form
-    if df.abs().max().max() > 1:
-        df = df / 100.0
-    
-    # Convert net returns (r) to gross returns (R = 1 + r)
-    # This matches the conversion in portfolio_analysis.py
-    df = 1 + df
-    
+    # Processed files already contain gross returns (R = 1 + r) in decimal form
+    # No conversion needed - data was converted during processing
     return df
 
 

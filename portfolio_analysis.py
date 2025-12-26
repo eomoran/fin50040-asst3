@@ -97,14 +97,8 @@ def load_portfolio_data(portfolio_type="size", start_year=1927, end_year=2013):
     end_date = pd.Timestamp(f"{end_year}-12-31")
     df = df[(df.index >= start_date) & (df.index <= end_date)]
     
-    # Convert returns from percentage to decimal if needed
-    # Fama-French data is typically in percentage form
-    if df.abs().max().max() > 1:
-        df = df / 100.0
-    
-    # Convert net returns (r) to gross returns (R = 1 + r)
-    df = 1 + df
-    
+    # Processed files already contain gross returns (R = 1 + r) in decimal form
+    # No conversion needed - data was converted during processing
     return df
 
 

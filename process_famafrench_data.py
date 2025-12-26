@@ -121,6 +121,10 @@ def parse_section(lines, section_label):
             if df[col].dtype == 'object':
                 df[col] = pd.to_numeric(df[col], errors='coerce')
         
+        # Convert from percentage to decimal if needed (Fama-French data is typically in percentage form)
+        if df.abs().max().max() > 1:
+            df = df / 100.0
+        
         return df
     except Exception as e:
         print(f"        Error parsing section '{section_label}': {e}")
@@ -239,6 +243,10 @@ def parse_famafrench_csv(csv_path):
             if df[col].dtype == 'object':
                 df[col] = pd.to_numeric(df[col], errors='coerce')
         
+        # Convert from percentage to decimal if needed (Fama-French data is typically in percentage form)
+        if df.abs().max().max() > 1:
+            df = df / 100.0
+        
         # Remove any rows where date is NaT (failed parsing)
         if df.index.name == 'Date':
             # Filter out NaT dates from index
@@ -295,6 +303,18 @@ def process_zip_file(zip_path):
                     output_filename = f"{zip_stem}_{data_file.stem}_{safe_label}.csv"
                     output_path = OUTPUT_DIR / output_filename
                     
+                    # Convert returns to gross returns (R = 1 + r) before saving
+                    # This ensures all analysis scripts work with gross returns consistently
+                    if 'Portfolio' in zip_stem or 'Portfolios' in zip_stem:
+                        # Portfolio returns: convert net to gross
+                        df = 1 + df
+                        print(f"    ✓ Converted portfolio returns to gross (R = 1 + r)")
+                    elif 'Factor' in zip_stem or 'Factors' in zip_stem:
+                        # Factor files: convert RF to gross, keep excess returns (Mkt-RF, SMB, HML) as-is
+                        if 'RF' in df.columns:
+                            df['RF'] = 1 + df['RF']
+                            print(f"    ✓ Converted RF to gross return (R_f = 1 + r_f)")
+                    
                     df.to_csv(output_path)
                     print(f"    ✓ Saved section '{section_label}' to {output_path}")
                     print(f"      Shape: {df.shape}, Date range: {df.index.min()} to {df.index.max()}")
@@ -307,6 +327,17 @@ def process_zip_file(zip_path):
                     zip_stem = zip_path.stem.replace('_CSV', '').replace('_TXT', '')
                     output_filename = f"{zip_stem}_{data_file.stem}.csv"
                     output_path = OUTPUT_DIR / output_filename
+                    
+                    # Convert returns to gross returns (R = 1 + r) before saving
+                    if 'Portfolio' in zip_stem or 'Portfolios' in zip_stem:
+                        # Portfolio returns: convert net to gross
+                        df = 1 + df
+                        print(f"    ✓ Converted portfolio returns to gross (R = 1 + r)")
+                    elif 'Factor' in zip_stem or 'Factors' in zip_stem:
+                        # Factor files: convert RF to gross, keep excess returns (Mkt-RF, SMB, HML) as-is
+                        if 'RF' in df.columns:
+                            df['RF'] = 1 + df['RF']
+                            print(f"    ✓ Converted RF to gross return (R_f = 1 + r_f)")
                     
                     df.to_csv(output_path)
                     print(f"    ✓ Saved to {output_path}")
