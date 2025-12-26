@@ -633,7 +633,127 @@ def estimate_jensens_alpha(returns, factors, rf, use_zero_beta=False, w_z=None, 
     return pd.Series(alphas), pd.Series(betas_dict)
 
 
-def main(start_year=1927, end_year=2013, portfolio_type="size", rra=4, output_suffix=None):
+def exclude_small_caps(returns, portfolio_type="size"):
+    """
+    Exclude small cap portfolios from the returns data
+    
+    For size portfolios, small caps are typically the smallest deciles.
+    Common small cap portfolio names: 'Lo 10', '2-Dec', 'Lo 20', 'Lo 30', '<= 0'
+    
+    Parameters:
+    -----------
+    returns : pd.DataFrame
+        Portfolio returns
+    portfolio_type : str
+        'size' or 'value'
+    
+    Returns:
+    --------
+    returns_filtered : pd.DataFrame
+        Returns with small caps excluded
+    """
+    if portfolio_type != "size":
+        # For non-size portfolios, return as-is (no small caps to exclude)
+        return returns
+    
+    # Small cap portfolio names (typically smallest deciles)
+    small_cap_names = ['<= 0', 'Lo 10', '2-Dec', 'Lo 20', 'Lo 30']
+    
+    # Find columns that match small cap names
+    cols_to_exclude = [col for col in returns.columns if any(sc in str(col) for sc in small_cap_names)]
+    
+    if cols_to_exclude:
+        print(f"  Excluding small caps: {cols_to_exclude}")
+        returns_filtered = returns.drop(columns=cols_to_exclude)
+        return returns_filtered
+    else:
+        return returns
+
+
+def recentre_returns(returns, factors, rf):
+    """
+    Recentre the data set by aligning means with CAPM and betas
+    
+    This adjusts portfolio returns so that their means align with CAPM predictions
+    based on their betas. The recentring process:
+    1. Estimate betas for each portfolio
+    2. Calculate expected returns from CAPM: E[r_i] = r_f + β_i * (E[r_m] - r_f)
+    3. Adjust returns: r_i_recentred = r_i - (mean(r_i) - E[r_i])
+    
+    Parameters:
+    -----------
+    returns : pd.DataFrame
+        Portfolio returns (time x portfolios)
+    factors : pd.DataFrame
+        Factor returns (time x factors)
+    rf : pd.Series
+        Risk-free rate
+    
+    Returns:
+    --------
+    returns_recentred : pd.DataFrame
+        Recentred portfolio returns (same index as input returns)
+    """
+    # Align dates
+    common_dates = returns.index.intersection(rf.index)
+    common_dates = common_dates[~common_dates.duplicated()]
+    
+    returns_aligned = returns.loc[common_dates]
+    rf_aligned = rf.loc[common_dates]
+    factors_aligned = factors.loc[common_dates] if hasattr(factors, 'loc') else factors
+    
+    # Get market excess return
+    if hasattr(factors_aligned, 'columns') and 'Mkt-RF' in factors_aligned.columns:
+        market_excess = factors_aligned['Mkt-RF']
+    else:
+        market_excess = factors_aligned.iloc[:, 0]
+    
+    # Calculate market return
+    market_return = market_excess + rf_aligned
+    
+    # Expected market return and risk-free rate
+    E_rf = rf_aligned.mean()
+    E_rm = market_return.mean()
+    market_excess_mean = E_rm - E_rf
+    
+    # Recentre each portfolio
+    returns_recentred = returns.copy()  # Start with original to preserve all dates
+    
+    for portfolio in returns_aligned.columns:
+        # Estimate beta
+        portfolio_excess = returns_aligned[portfolio] - rf_aligned
+        common_dates_port = portfolio_excess.index.intersection(market_excess.index)
+        
+        if len(common_dates_port) < 2:
+            continue
+        
+        y = portfolio_excess.loc[common_dates_port].values
+        X = market_excess.loc[common_dates_port].values.reshape(-1, 1)
+        X = np.column_stack([np.ones(len(X)), X])
+        
+        try:
+            beta = np.linalg.lstsq(X, y, rcond=None)[0]
+            beta_i = beta[1] if len(beta) > 1 else 0
+        except:
+            beta_i = 0
+        
+        # Expected return from CAPM
+        E_ri = E_rf + beta_i * market_excess_mean
+        
+        # Actual mean return
+        mean_ri = returns_aligned[portfolio].mean()
+        
+        # Adjustment: subtract the difference between actual and expected mean
+        adjustment = mean_ri - E_ri
+        
+        # Apply adjustment to all dates (not just common dates)
+        returns_recentred[portfolio] = returns[portfolio] - adjustment
+    
+    return returns_recentred
+
+
+def main(start_year=1927, end_year=2013, portfolio_type="size", rra=4, 
+         output_suffix=None, exclude_small_caps_flag=False, recentre_flag=False):
     """
     Main analysis function
     
@@ -649,6 +769,10 @@ def main(start_year=1927, end_year=2013, portfolio_type="size", rra=4, output_su
         Relative Risk Aversion coefficient (default: 4)
     output_suffix : str, optional
         Suffix to add to output filenames (e.g., '_1927_2024' or '_value')
+    exclude_small_caps_flag : bool
+        If True, exclude small cap portfolios (default: False)
+    recentre_flag : bool
+        If True, recentre returns to align with CAPM (default: False)
     """
     print("=" * 70)
     print("Portfolio Analysis for Assignment 3")
@@ -658,6 +782,10 @@ def main(start_year=1927, end_year=2013, portfolio_type="size", rra=4, output_su
     print(f"Analysis period: {start_year}-{end_year}")
     print(f"Portfolio type: {portfolio_type}")
     print(f"CRRA RRA coefficient: {rra}")
+    if exclude_small_caps_flag:
+        print(f"Excluding small caps: Yes")
+    if recentre_flag:
+        print(f"Recentring data: Yes")
     print()
     
     # Load data
@@ -681,6 +809,19 @@ def main(start_year=1927, end_year=2013, portfolio_type="size", rra=4, output_su
             raise ValueError(f"No portfolio data found for period {start_year}-{end_year}")
         if len(factors) == 0:
             raise ValueError(f"No factor data found for period {start_year}-{end_year}")
+        
+        # Exclude small caps if requested
+        if exclude_small_caps_flag:
+            returns = exclude_small_caps(returns, portfolio_type)
+        
+        # Recentre data if requested
+        if recentre_flag:
+            if 'RF' in factors.columns:
+                rf = factors['RF']
+            else:
+                rf = pd.Series(0, index=factors.index)
+            print("  Recentring returns to align with CAPM...")
+            returns = recentre_returns(returns, factors, rf)
         
         print(f"  Loaded {len(returns.columns)} portfolios")
         print(f"  Portfolio time period: {returns.index[0].date()} to {returns.index[-1].date()}")
@@ -780,7 +921,14 @@ def main(start_year=1927, end_year=2013, portfolio_type="size", rra=4, output_su
     
     # Save to files (use portfolio_names for indexing)
     # Create full weight vectors with zeros for filtered portfolios
-    suffix = output_suffix if output_suffix else f"_{portfolio_type}_{start_year}_{end_year}"
+    if output_suffix:
+        suffix = output_suffix
+    else:
+        suffix = f"_{portfolio_type}_{start_year}_{end_year}"
+        if exclude_small_caps_flag:
+            suffix += "_no_small_caps"
+        if recentre_flag:
+            suffix += "_recentred"
     
     w_msmp_full = pd.Series(0.0, index=returns.columns)
     w_msmp_full[portfolio_names] = w_msmp
@@ -821,6 +969,15 @@ Examples:
   
   # Value portfolios, 1927-2024
   python portfolio_analysis.py --portfolio-type value --start-year 1927 --end-year 2024
+  
+  # Exclude small caps (optional step 8)
+  python portfolio_analysis.py --exclude-small-caps
+  
+  # Recentre data (optional step 9)
+  python portfolio_analysis.py --recentre
+  
+  # Both optional steps
+  python portfolio_analysis.py --exclude-small-caps --recentre
         """
     )
     
@@ -845,6 +1002,14 @@ Examples:
         '--output-suffix', type=str, default=None,
         help='Optional suffix for output filenames (default: auto-generated from parameters)'
     )
+    parser.add_argument(
+        '--exclude-small-caps', action='store_true',
+        help='Exclude small cap portfolios from analysis (optional, step 8)'
+    )
+    parser.add_argument(
+        '--recentre', action='store_true',
+        help='Recentre data to align means with CAPM and betas (optional, step 9)'
+    )
     
     args = parser.parse_args()
     
@@ -853,6 +1018,8 @@ Examples:
         end_year=args.end_year,
         portfolio_type=args.portfolio_type,
         rra=args.rra,
-        output_suffix=args.output_suffix
+        output_suffix=args.output_suffix,
+        exclude_small_caps_flag=args.exclude_small_caps,
+        recentre_flag=args.recentre
     )
 
