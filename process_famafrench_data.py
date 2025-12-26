@@ -82,15 +82,39 @@ def parse_section(lines, section_label):
             on_bad_lines='skip'
         )
         
-        # Parse dates
-        first_col = df.columns[0]
-        if df[first_col].dtype == 'object':
-            sample_val = str(df[first_col].iloc[0]) if len(df) > 0 else ''
+        # Parse dates - check for date column (could be first col or "Unnamed: 0")
+        date_col = None
+        for col in df.columns:
+            if col == 'Unnamed: 0' or (df[col].dtype in ['int64', 'float64'] and len(df) > 0):
+                sample_val = str(df[col].iloc[0])
+                # Check if it looks like a date (YYYY or YYYYMM)
+                if (len(sample_val) == 4 and sample_val.isdigit()) or (len(sample_val) == 6 and sample_val.isdigit()):
+                    date_col = col
+                    break
+        
+        # If no date column found, try first column
+        if date_col is None:
+            date_col = df.columns[0]
+        
+        if date_col in df.columns:
+            sample_val = str(df[date_col].iloc[0]) if len(df) > 0 else ''
+            # Check if it's YYYYMM format (6 digits) - monthly data
             if len(sample_val) == 6 and sample_val.isdigit():
-                df[first_col] = pd.to_datetime(df[first_col].astype(str), format='%Y%m', errors='coerce')
-                df = df.rename(columns={first_col: 'Date'})
+                df[date_col] = pd.to_datetime(df[date_col].astype(str), format='%Y%m', errors='coerce')
+                df = df.rename(columns={date_col: 'Date'})
                 df = df.set_index('Date')
-                df = df[df.index.notna()]  # Remove invalid dates
+            # Check if it's YYYY format (4 digits) - annual data
+            elif len(sample_val) == 4 and sample_val.isdigit():
+                df[date_col] = pd.to_datetime(df[date_col].astype(str) + '-01-01', format='%Y-%m-%d', errors='coerce')
+                df = df.rename(columns={date_col: 'Date'})
+                df = df.set_index('Date')
+            else:
+                # Try to parse as date anyway
+                df[date_col] = pd.to_datetime(df[date_col], errors='coerce')
+                df = df.rename(columns={date_col: 'Date'})
+                df = df.set_index('Date')
+            
+            df = df[df.index.notna()]  # Remove invalid dates
         
         # Convert numeric columns
         for col in df.columns:
