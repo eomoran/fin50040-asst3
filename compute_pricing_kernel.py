@@ -25,14 +25,14 @@ DATA_DIR = Path("data/processed")
 
 def compute_pricing_kernel_from_returns(returns, w_msmp):
     """
-    Compute pricing kernel (SDF) from portfolio returns and MSMP weights
+    Compute pricing kernel (SDF) from portfolio gross returns and MSMP weights
     
     Parameters:
     -----------
     returns : pd.DataFrame
-        Portfolio returns (time x portfolios)
+        Portfolio gross returns (R = 1 + r, time x portfolios)
     w_msmp : pd.Series
-        MSMP weights (indexed by portfolio names)
+        MSMP weights (indexed by portfolio names, computed using gross returns)
     
     Returns:
     --------
@@ -45,16 +45,14 @@ def compute_pricing_kernel_from_returns(returns, w_msmp):
     E_R2_msmp : float
         Expected squared gross return on MSMP
     msmp_returns : pd.Series
-        MSMP return series (net returns)
+        MSMP return series (gross returns R_msmp)
     """
     # Align weights with returns columns
     w_aligned = w_msmp.reindex(returns.columns, fill_value=0.0)
     
-    # Compute MSMP return series: r_msmp,t = sum_i w_i * r_i,t
-    msmp_returns = (returns * w_aligned).sum(axis=1)
-    
-    # Convert to gross returns: R_msmp = 1 + r_msmp
-    R_msmp = 1 + msmp_returns
+    # Compute MSMP gross return series: R_msmp,t = sum_i w_i * R_i,t
+    # Since returns are already gross returns (R = 1 + r), we don't need to add 1
+    R_msmp = (returns * w_aligned).sum(axis=1)
     
     # Compute second moment: E[R_msmp^2]
     E_R2_msmp = (R_msmp ** 2).mean()
@@ -70,6 +68,9 @@ def compute_pricing_kernel_from_returns(returns, w_msmp):
     
     # Verify: should equal E[R_msmp] / E[R_msmp^2]
     p_m_alt = E_R_msmp / E_R2_msmp
+    
+    # msmp_returns should be gross returns for consistency
+    msmp_returns = R_msmp
     
     return m, p_m, p_m_alt, E_R_msmp, E_R2_msmp, msmp_returns
 
@@ -154,6 +155,10 @@ def load_portfolio_returns(portfolio_type, start_year, end_year):
     if df.abs().max().max() > 1:
         df = df / 100.0
     
+    # Convert net returns (r) to gross returns (R = 1 + r)
+    # This matches the conversion in portfolio_analysis.py
+    df = 1 + df
+    
     return df
 
 
@@ -184,11 +189,14 @@ def analyze_pricing_kernel(portfolio_type, start_year, end_year):
     pricing_errors = verify_pricing_properties(m, returns)
     
     # Compute statistics
-    msmp_net_return = msmp_returns.mean()
-    msmp_vol = msmp_returns.std()
+    # msmp_returns are gross returns (R)
+    msmp_gross_return = msmp_returns.mean()  # Mean gross return E[R]
+    msmp_net_return = msmp_gross_return - 1  # Mean net return E[r] = E[R] - 1
+    msmp_vol = msmp_returns.std()  # Volatility (same for net and gross)
     
     print(f"\nMSMP Statistics:")
-    print(f"  Expected return (annualized): {msmp_net_return:.6f}")
+    print(f"  Expected return (gross, annualized): {msmp_gross_return:.6f}")
+    print(f"  Expected return (net, annualized): {msmp_net_return:.6f}")
     print(f"  Volatility (annualized): {msmp_vol:.6f}")
     print(f"  Expected gross return E[R_msmp]: {E_R_msmp:.6f}")
     print(f"  Expected squared return E[R_msmp^2]: {E_R2_msmp:.6f}")
