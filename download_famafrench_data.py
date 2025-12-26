@@ -179,11 +179,19 @@ def download_famafrench_file(url, file_name, description):
 
 def download_size_portfolios(available_files, file_map):
     """Download 10 size portfolios (Portfolios Formed on ME)"""
-    file_name = find_file_by_keywords(available_files, ['Portfolios', 'ME'], prefer_csv=True)
+    # Look for exact file name first
+    exact_match = 'Portfolios_Formed_on_ME_CSV.zip'
+    if exact_match in available_files:
+        file_name = exact_match
+    else:
+        # Fallback to keyword matching
+        file_name = find_file_by_keywords(available_files, ['Formed_on_ME', 'Portfolios'], prefer_csv=True)
+    
     if not file_name:
         print("  ✗ Could not find size portfolios file")
+        print("     Looking for: Portfolios_Formed_on_ME_CSV.zip")
         return None
-    url = file_map.get(file_name, BASE_URL + file_name)
+    url = file_map.get(file_name, BASE_URL + "ftp/" + file_name)
     return download_famafrench_file(url, file_name, "10 Size Portfolios")
 
 
@@ -197,7 +205,7 @@ def download_benchmark_factors(available_files, file_map):
     
     result_3f = None
     if file_3f:
-        url_3f = file_map.get(file_3f, BASE_URL + file_3f)
+        url_3f = file_map.get(file_3f, BASE_URL + "ftp/" + file_3f)
         result_3f = download_famafrench_file(url_3f, file_3f, "Fama-French 3-Factor Model")
     
     # 5-Factor Model
@@ -207,7 +215,7 @@ def download_benchmark_factors(available_files, file_map):
     
     result_5f = None
     if file_5f:
-        url_5f = file_map.get(file_5f, BASE_URL + file_5f)
+        url_5f = file_map.get(file_5f, BASE_URL + "ftp/" + file_5f)
         result_5f = download_famafrench_file(url_5f, file_5f, "Fama-French 5-Factor Model")
     
     return result_3f, result_5f
@@ -239,15 +247,27 @@ def download_second_portfolio_sort(available_files, file_map, sort_type="value")
         print(f"     Available options: {list(sort_keywords.keys())}")
         return None
     
-    keywords = sort_keywords[sort_type]
-    file_name = find_file_by_keywords(available_files, keywords, prefer_csv=True)
+    # For value (BE-ME), look for exact file name first
+    if sort_type == "value":
+        exact_match = 'Portfolios_Formed_on_BE-ME_CSV.zip'
+        if exact_match in available_files:
+            file_name = exact_match
+        else:
+            keywords = sort_keywords[sort_type]
+            file_name = find_file_by_keywords(available_files, ['Formed_on_BE-ME', 'Portfolios'], prefer_csv=True)
+    else:
+        keywords = sort_keywords[sort_type]
+        file_name = find_file_by_keywords(available_files, keywords, prefer_csv=True)
     
     if not file_name:
         print(f"  ✗ Could not find {sort_type} portfolio file")
-        print(f"     Searched for files containing: {keywords}")
+        if sort_type == "value":
+            print(f"     Looking for: Portfolios_Formed_on_BE-ME_CSV.zip")
+        else:
+            print(f"     Searched for files containing: {keywords}")
         return None
     
-    url = file_map.get(file_name, BASE_URL + file_name)
+    url = file_map.get(file_name, BASE_URL + "ftp/" + file_name)
     description = f"Portfolio sort: {sort_type.title()}"
     return download_famafrench_file(url, file_name, description)
 
