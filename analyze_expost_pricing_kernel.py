@@ -61,15 +61,20 @@ def load_msmp_returns(portfolio_type, start_year, end_year, exclude_small_caps=F
 
 def compute_pricing_kernel(msmp_returns):
     """
-    Compute pricing kernel (SDF) from MSMP returns
+    Compute pricing kernel (SDF) from MSMP gross returns
     
     The pricing kernel is: m = R_msmp / E[R_msmp^2]
-    where R_msmp is the return on the MSMP portfolio
+    where R_msmp is the gross return on the MSMP portfolio
     
     The price of the SDF is: p(m) = E[m] = E[R_msmp] / E[R_msmp^2]
+    
+    Parameters:
+    -----------
+    msmp_returns : pd.Series
+        MSMP gross returns (R_msmp = 1 + r_msmp)
     """
-    # Ensure returns are in the right format (1 + return)
-    R_msmp = 1 + msmp_returns
+    # msmp_returns are already gross returns (R) from load_msmp_returns
+    R_msmp = msmp_returns
     
     # Compute E[R_msmp^2]
     E_R2 = (R_msmp ** 2).mean()
