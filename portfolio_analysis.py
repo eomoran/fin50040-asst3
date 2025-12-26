@@ -44,20 +44,29 @@ def load_portfolio_data(portfolio_type="size", start_year=1927, end_year=2013):
     else:
         raise ValueError(f"Unknown portfolio type: {portfolio_type}")
     
-    # Find the file - prefer monthly value-weighted section
+    # Find the file - prefer annual value-weighted section (as per assignment)
+    # The processed files now have section names in the filename
     files = list(DATA_DIR.glob(file_pattern))
     if not files:
         raise FileNotFoundError(f"No file found matching {file_pattern}")
     
-    # Prefer monthly value-weighted if available
-    monthly_vw_files = [f for f in files if 'Monthly' in f.name and 'Value' in f.name]
-    if monthly_vw_files:
-        file_to_use = monthly_vw_files[0]
+    # Prefer annual value-weighted if available (as specified in assignment: "Annual value-weighted gross returns")
+    annual_vw_files = [f for f in files if 'Annual' in f.name and ('Value' in f.name or 'Weight' in f.name) and 'Equal' not in f.name]
+    if annual_vw_files:
+        file_to_use = annual_vw_files[0]
         print(f"  Using: {file_to_use.name}")
+        print(f"  Section: Annual Value-Weighted Returns (as per assignment)")
     else:
-        # Fall back to first file found
-        file_to_use = files[0]
-        print(f"  Using: {file_to_use.name} (no monthly value-weighted found)")
+        # Fall back to monthly value-weighted
+        monthly_vw_files = [f for f in files if 'Monthly' in f.name and ('Value' in f.name or 'Weight' in f.name) and 'Equal' not in f.name]
+        if monthly_vw_files:
+            file_to_use = monthly_vw_files[0]
+            print(f"  Using: {file_to_use.name}")
+            print(f"  Section: Monthly Value-Weighted (Annual not found)")
+        else:
+            # Fall back to first file found
+            file_to_use = files[0]
+            print(f"  Using: {file_to_use.name} (no section preference found)")
     
     df = pd.read_csv(file_to_use, index_col=0)
     
