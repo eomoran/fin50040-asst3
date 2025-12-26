@@ -298,9 +298,19 @@ def construct_mv_frontier(mu, Sigma, num_portfolios=100):
     
     # Maximum return
     mu_max = mu.max()
+    # Minimum return (for inefficient part of frontier)
+    mu_min = mu.min()
     
-    # Generate target returns between min and max
-    target_returns = np.linspace(mu_minvar, mu_max, num_portfolios)
+    # Generate target returns to cover BOTH efficient and inefficient parts
+    # Efficient part: from MVP to max return
+    # Inefficient part: from min return to MVP
+    # Use more points for smoother curve
+    num_efficient = int(num_portfolios * 0.6)  # 60% for efficient part
+    num_inefficient = num_portfolios - num_efficient  # 40% for inefficient part
+    
+    target_returns_efficient = np.linspace(mu_minvar, mu_max, num_efficient)
+    target_returns_inefficient = np.linspace(mu_min, mu_minvar, num_inefficient + 1)[:-1]  # Exclude duplicate MVP
+    target_returns = np.concatenate([target_returns_inefficient, target_returns_efficient])
     
     frontier_returns = []
     frontier_vols = []
