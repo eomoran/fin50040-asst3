@@ -15,6 +15,7 @@ import numpy as np
 from pathlib import Path
 from scipy.optimize import minimize
 import matplotlib.pyplot as plt
+import argparse
 import warnings
 warnings.filterwarnings('ignore')
 
@@ -632,31 +633,45 @@ def estimate_jensens_alpha(returns, factors, rf, use_zero_beta=False, w_z=None, 
     return pd.Series(alphas), pd.Series(betas_dict)
 
 
-def main():
-    """Main analysis function"""
+def main(start_year=1927, end_year=2013, portfolio_type="size", rra=4, output_suffix=None):
+    """
+    Main analysis function
+    
+    Parameters:
+    -----------
+    start_year : int
+        Start year for analysis (default: 1927)
+    end_year : int
+        End year for analysis (default: 2013)
+    portfolio_type : str
+        Portfolio type: 'size' or 'value' (default: 'size')
+    rra : float
+        Relative Risk Aversion coefficient (default: 4)
+    output_suffix : str, optional
+        Suffix to add to output filenames (e.g., '_1927_2024' or '_value')
+    """
     print("=" * 70)
     print("Portfolio Analysis for Assignment 3")
     print("=" * 70)
     print()
     
-    # Analysis parameters
-    start_year = 1927
-    end_year = 2013
-    rra = 4
-    
     print(f"Analysis period: {start_year}-{end_year}")
+    print(f"Portfolio type: {portfolio_type}")
     print(f"CRRA RRA coefficient: {rra}")
     print()
     
     # Load data
     print("Loading data...")
     try:
-        returns = load_portfolio_data("size", start_year, end_year)
+        returns = load_portfolio_data(portfolio_type, start_year, end_year)
         # Check if we're using annual data
         is_annual = 'Annual' in str(returns.index[0]) if len(returns) > 0 else False
         if not is_annual:
-            # Check file name
-            files = list(DATA_DIR.glob("*Portfolios_Formed_on_ME*Annual*.csv"))
+            # Check file name based on portfolio type
+            if portfolio_type == "size":
+                files = list(DATA_DIR.glob("*Portfolios_Formed_on_ME*Annual*.csv"))
+            else:
+                files = list(DATA_DIR.glob("*Portfolios_Formed_on_BE-ME*Annual*.csv"))
             is_annual = len(files) > 0
         
         factors = load_factors(start_year, end_year, prefer_annual=is_annual)
@@ -765,19 +780,21 @@ def main():
     
     # Save to files (use portfolio_names for indexing)
     # Create full weight vectors with zeros for filtered portfolios
+    suffix = output_suffix if output_suffix else f"_{portfolio_type}_{start_year}_{end_year}"
+    
     w_msmp_full = pd.Series(0.0, index=returns.columns)
     w_msmp_full[portfolio_names] = w_msmp
-    w_msmp_full.to_csv(OUTPUT_DIR / "msmp_weights.csv")
+    w_msmp_full.to_csv(OUTPUT_DIR / f"msmp_weights{suffix}.csv")
     
     w_opt_full = pd.Series(0.0, index=returns.columns)
     w_opt_full[portfolio_names] = w_opt
-    w_opt_full.to_csv(OUTPUT_DIR / "optimal_weights.csv")
+    w_opt_full.to_csv(OUTPUT_DIR / f"optimal_weights{suffix}.csv")
     
     w_z_full = pd.Series(0.0, index=returns.columns)
     w_z_full[portfolio_names] = w_z
-    w_z_full.to_csv(OUTPUT_DIR / "zero_beta_weights.csv")
-    alphas_zb.to_csv(OUTPUT_DIR / "jensens_alpha_zerobeta.csv")
-    alphas_rf.to_csv(OUTPUT_DIR / "jensens_alpha_rf.csv")
+    w_z_full.to_csv(OUTPUT_DIR / f"zero_beta_weights{suffix}.csv")
+    alphas_zb.to_csv(OUTPUT_DIR / f"jensens_alpha_zerobeta{suffix}.csv")
+    alphas_rf.to_csv(OUTPUT_DIR / f"jensens_alpha_rf{suffix}.csv")
     
     print(f"  Results saved to {OUTPUT_DIR}/")
     print("\n" + "=" * 70)
@@ -788,5 +805,54 @@ def main():
 
 
 if __name__ == "__main__":
-    results = main()
+    parser = argparse.ArgumentParser(
+        description="Portfolio Analysis for Assignment 3: Mean-Variance Portfolio Theory and the CAPM",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  # Size portfolios, 1927-2013 (default)
+  python portfolio_analysis.py
+  
+  # Size portfolios, 1927-2024
+  python portfolio_analysis.py --start-year 1927 --end-year 2024
+  
+  # Value (BE-ME) portfolios, 1927-2013
+  python portfolio_analysis.py --portfolio-type value
+  
+  # Value portfolios, 1927-2024
+  python portfolio_analysis.py --portfolio-type value --start-year 1927 --end-year 2024
+        """
+    )
+    
+    parser.add_argument(
+        '--start-year', type=int, default=1927,
+        help='Start year for analysis (default: 1927)'
+    )
+    parser.add_argument(
+        '--end-year', type=int, default=2013,
+        help='End year for analysis (default: 2013)'
+    )
+    parser.add_argument(
+        '--portfolio-type', type=str, default='size',
+        choices=['size', 'value'],
+        help='Portfolio type: "size" for size portfolios, "value" for BE-ME portfolios (default: size)'
+    )
+    parser.add_argument(
+        '--rra', type=float, default=4.0,
+        help='Relative Risk Aversion coefficient for CRRA utility (default: 4.0)'
+    )
+    parser.add_argument(
+        '--output-suffix', type=str, default=None,
+        help='Optional suffix for output filenames (default: auto-generated from parameters)'
+    )
+    
+    args = parser.parse_args()
+    
+    results = main(
+        start_year=args.start_year,
+        end_year=args.end_year,
+        portfolio_type=args.portfolio_type,
+        rra=args.rra,
+        output_suffix=args.output_suffix
+    )
 
