@@ -331,14 +331,46 @@ def construct_mv_frontier(mu, Sigma, num_portfolios=100):
         
         bounds = [(-1, 1) for _ in range(n)]  # Allow short selling
         
-        # Initial guess: equal weights
-        w0 = np.ones(n) / n
+        # Better initial guess: for inefficient part, try negative of MVP
+        if target_return < mu_minvar:
+            # For inefficient part, try a guess that might work
+            w0 = -w_minvar.copy()
+            w0 = w0 / np.sum(w0) if np.abs(np.sum(w0)) > 1e-10 else np.ones(n) / n
+        else:
+            w0 = np.ones(n) / n
         
-        result = minimize(objective, w0, method='SLSQP', 
-                         bounds=bounds, constraints=constraints)
+        # Try multiple initial guesses for robustness
+        initial_guesses = [w0]
+        if target_return < mu_minvar:
+            # For inefficient part, also try equal weights and scaled MVP
+            initial_guesses.append(np.ones(n) / n)
+            w_scaled = w_minvar * 0.5
+            w_scaled = w_scaled / np.sum(w_scaled) if np.abs(np.sum(w_scaled)) > 1e-10 else np.ones(n) / n
+            initial_guesses.append(w_scaled)
         
-        if result.success:
-            w = result.x
+        best_result = None
+        best_variance = np.inf
+        
+        for w_init in initial_guesses:
+            try:
+                result = minimize(objective, w_init, method='SLSQP', 
+                                 bounds=bounds, constraints=constraints,
+                                 options={'maxiter': 2000, 'ftol': 1e-9})
+                
+                if result.success:
+                    # Verify constraints
+                    budget_check = abs(np.sum(result.x) - 1)
+                    return_check = abs(mu.T @ result.x - target_return)
+                    
+                    if budget_check < 1e-5 and return_check < 1e-5:
+                        if result.fun < best_variance:
+                            best_result = result
+                            best_variance = result.fun
+            except:
+                continue
+        
+        if best_result is not None:
+            w = best_result.x
             portfolio_return = mu.T @ w
             portfolio_vol = np.sqrt(w.T @ Sigma @ w)
             
@@ -502,13 +534,19 @@ def find_zero_beta_portfolio(mu, Sigma, w_m, on_frontier=True):
         
         w_minvar = inv_Sigma @ ones / (ones.T @ inv_Sigma @ ones)
         mu_minvar = mu.T @ w_minvar
-        mu_max = mu.max()
-        mu_min = mu.min()  # Minimum return (for inefficient part of frontier)
         
-        # Search along BOTH parts of frontier (efficient and inefficient)
-        # The inefficient part has returns below MVP but is still on the frontier
-        # Search from mu_min to mu_max to cover both limbs
-        target_returns = np.linspace(mu_min, mu_max, 300)
+        # Get optimal portfolio return for reasonable search range
+        # ZBP should be between MVP and optimal, or slightly below MVP (inefficient part)
+        # Restrict search to reasonable range: from slightly below MVP to optimal return
+        mu_optimal = mu.T @ w_m  # Return of the optimal portfolio
+        
+        # Search range: extend slightly below MVP (inefficient part) to optimal return
+        # This is more reasonable than searching from mu_min to mu_max
+        search_min = mu_minvar * 0.95  # 5% below MVP (inefficient part)
+        search_max = max(mu_optimal, mu_minvar * 1.1)  # At least to optimal, or 10% above MVP
+        
+        # Use fine grid for better precision
+        target_returns = np.linspace(search_min, search_max, 400)
         
         best_w = None
         best_cov = np.inf
