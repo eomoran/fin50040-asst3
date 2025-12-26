@@ -14,7 +14,8 @@ import sys
 from pathlib import Path
 
 # Configuration: List of analyses to run
-ANALYSES = [
+# Required analyses (steps 2-7)
+REQUIRED_ANALYSES = [
     {
         'name': 'Size Portfolios (1927-2013)',
         'args': ['--start-year', '1927', '--end-year', '2013', '--portfolio-type', 'size']
@@ -32,6 +33,62 @@ ANALYSES = [
         'args': ['--start-year', '1927', '--end-year', '2024', '--portfolio-type', 'value']
     }
 ]
+
+# Optional analyses (steps 8-9)
+# Step 8: Exclude small caps
+OPTIONAL_EXCLUDE_SMALL_CAPS = [
+    {
+        'name': 'Size Portfolios (1927-2013) - Exclude Small Caps',
+        'args': ['--start-year', '1927', '--end-year', '2013', '--portfolio-type', 'size', '--exclude-small-caps']
+    },
+    {
+        'name': 'Size Portfolios (1927-2024) - Exclude Small Caps',
+        'args': ['--start-year', '1927', '--end-year', '2024', '--portfolio-type', 'size', '--exclude-small-caps']
+    }
+]
+
+# Step 9: Recentre data
+OPTIONAL_RECENTRE = [
+    {
+        'name': 'Size Portfolios (1927-2013) - Recentred',
+        'args': ['--start-year', '1927', '--end-year', '2013', '--portfolio-type', 'size', '--recentre']
+    },
+    {
+        'name': 'Size Portfolios (1927-2024) - Recentred',
+        'args': ['--start-year', '1927', '--end-year', '2024', '--portfolio-type', 'size', '--recentre']
+    },
+    {
+        'name': 'Value Portfolios (1927-2013) - Recentred',
+        'args': ['--start-year', '1927', '--end-year', '2013', '--portfolio-type', 'value', '--recentre']
+    },
+    {
+        'name': 'Value Portfolios (1927-2024) - Recentred',
+        'args': ['--start-year', '1927', '--end-year', '2024', '--portfolio-type', 'value', '--recentre']
+    }
+]
+
+# Step 9 (continued): Recentre + Exclude Small Caps
+OPTIONAL_BOTH = [
+    {
+        'name': 'Size Portfolios (1927-2013) - Exclude Small Caps + Recentred',
+        'args': ['--start-year', '1927', '--end-year', '2013', '--portfolio-type', 'size', '--exclude-small-caps', '--recentre']
+    },
+    {
+        'name': 'Size Portfolios (1927-2024) - Exclude Small Caps + Recentred',
+        'args': ['--start-year', '1927', '--end-year', '2024', '--portfolio-type', 'size', '--exclude-small-caps', '--recentre']
+    }
+]
+
+# Combine all analyses (set to False to skip optional analyses)
+INCLUDE_OPTIONAL = True
+
+if INCLUDE_OPTIONAL:
+    ANALYSES = (REQUIRED_ANALYSES + 
+                OPTIONAL_EXCLUDE_SMALL_CAPS + 
+                OPTIONAL_RECENTRE + 
+                OPTIONAL_BOTH)
+else:
+    ANALYSES = REQUIRED_ANALYSES
 
 def run_analysis(name, args):
     """Run a single analysis"""
@@ -59,6 +116,16 @@ def main():
     print("=" * 70)
     print("Running All Portfolio Analyses for Assignment 3")
     print("=" * 70)
+    
+    if INCLUDE_OPTIONAL:
+        print(f"\nRequired analyses: {len(REQUIRED_ANALYSES)}")
+        print(f"Optional analyses: {len(OPTIONAL_EXCLUDE_SMALL_CAPS + OPTIONAL_RECENTRE + OPTIONAL_BOTH)}")
+        print(f"  - Exclude small caps: {len(OPTIONAL_EXCLUDE_SMALL_CAPS)}")
+        print(f"  - Recentre: {len(OPTIONAL_RECENTRE)}")
+        print(f"  - Both: {len(OPTIONAL_BOTH)}")
+    else:
+        print(f"\nRunning required analyses only (set INCLUDE_OPTIONAL=True for optional steps)")
+    
     print(f"\nTotal analyses to run: {len(ANALYSES)}")
     
     results = []
