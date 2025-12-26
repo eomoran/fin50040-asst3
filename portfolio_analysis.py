@@ -51,7 +51,8 @@ def load_portfolio_data(portfolio_type="size", start_year=1927, end_year=2013):
     if not files:
         raise FileNotFoundError(f"No file found matching {file_pattern}")
     
-    # Prefer annual value-weighted if available (as specified in assignment: "Annual value-weighted gross returns")
+    # Prefer annual value-weighted if available (as specified in assignment: "Annual value-weighted returns")
+    # Note: Fama-French data provides net returns (r), not gross returns (R = 1 + r)
     annual_vw_files = [f for f in files if 'Annual' in f.name and ('Value' in f.name or 'Weight' in f.name) and 'Equal' not in f.name]
     if annual_vw_files:
         file_to_use = annual_vw_files[0]
@@ -349,22 +350,26 @@ def find_msmp(mu, Sigma):
     """
     Find Minimum Second Moment Portfolio (MSMP)
     
-    MSMP minimizes w'Σw + (w'μ)² = w'(Σ + μμ')w
-    subject to budget constraint
+    MSMP minimizes E[R²] where R = 1 + r is the gross return.
+    For net returns r with mean μ and covariance Σ:
+    E[R²] = E[(1 + w'r)²] = 1 + 2w'μ + w'Σw + (w'μ)²
+    
+    Since the constant 1 doesn't affect minimization, we minimize:
+    2w'μ + w'Σw + (w'μ)² = 2w'μ + w'(Σ + μμ')w
     
     Parameters:
     -----------
     mu : np.array
-        Mean returns
+        Mean net returns (r)
     Sigma : np.array
-        Covariance matrix
+        Covariance matrix of net returns
     
     Returns:
     --------
     w_msmp : np.array
         MSMP portfolio weights
     msmp_return : float
-        MSMP expected return
+        MSMP expected return (net return)
     msmp_vol : float
         MSMP volatility
     """
@@ -373,9 +378,10 @@ def find_msmp(mu, Sigma):
     # Second moment matrix: Σ + μμ'
     M = Sigma + np.outer(mu, mu)
     
-    # Minimize w'Mw subject to budget constraint
+    # Minimize 2w'μ + w'Mw subject to budget constraint
+    # This is equivalent to minimizing E[(1 + w'r)²] = E[R²]
     def objective(w):
-        return w.T @ M @ w
+        return 2 * (mu.T @ w) + w.T @ M @ w
     
     constraints = {'type': 'eq', 'fun': lambda w: np.sum(w) - 1}
     bounds = [(-1, 1) for _ in range(n)]
