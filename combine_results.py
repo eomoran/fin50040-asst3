@@ -7,6 +7,7 @@ time periods, and flags) into consolidated CSV files for easier comparison.
 """
 
 import pandas as pd
+import numpy as np
 from pathlib import Path
 import re
 
@@ -150,8 +151,23 @@ def combine_results():
         
         for csv_file, config in files:
             try:
-                # Read the CSV
+                # Read the CSV - first column is portfolio name (index), second is value
                 df = pd.read_csv(csv_file, index_col=0)
+                
+                # The value column should be the first (and likely only) data column
+                # It might be named '0' or 'Unnamed: 0' or have no name
+                value_col = df.columns[0]
+                
+                # Extract the value series before adding config columns
+                values = df[value_col].copy()
+                
+                # Reset index to make portfolio name a column
+                df = df.reset_index()
+                df = df.rename(columns={df.columns[0]: 'portfolio'})
+                
+                # Replace the value column with properly named one
+                df = df.drop(columns=[value_col])
+                df[metric] = values.values
                 
                 # Add configuration columns
                 df['portfolio_type'] = config['portfolio_type']
@@ -170,21 +186,6 @@ def combine_results():
                     config_parts.append('recentred')
                 
                 df['configuration'] = '_'.join(config_parts)
-                
-                # The first column should be the value (metric value)
-                # Rename it to the metric name if it's not already
-                value_col = df.columns[0]
-                if value_col == '0' or value_col == 'Unnamed: 0':
-                    # The actual values are in the first data column
-                    if len(df.columns) > 1:
-                        value_col = df.columns[1]
-                
-                # Rename value column to metric name
-                df = df.rename(columns={value_col: metric})
-                
-                # Reset index to make portfolio name a column
-                df = df.reset_index()
-                df = df.rename(columns={df.columns[0]: 'portfolio'})
                 
                 combined_data.append(df)
                 
