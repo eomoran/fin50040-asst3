@@ -167,8 +167,57 @@ def load_optimal_crra_data(portfolio_type, start_year, end_year, rra=4.0, allow_
     return summary_df[mask].iloc[0]
 
 
+def load_zbp_data(portfolio_type, start_year, end_year, rra=4.0, allow_short_selling=True, on_frontier=True):
+    """
+    Load Zero-Beta Portfolio data from summary CSV
+    
+    Parameters:
+    -----------
+    portfolio_type : str
+        'size' or 'value'
+    start_year : int
+        Start year
+    end_year : int
+        End year
+    rra : float
+        Relative Risk Aversion coefficient for optimal portfolio (default: 4.0)
+    allow_short_selling : bool
+        Whether short selling was allowed
+    on_frontier : bool
+        Whether ZBP was constrained to be on frontier
+    
+    Returns:
+    --------
+    zbp_summary : pd.Series
+        Summary row from zbp_summary.csv, or None if not found
+    """
+    summary_file = RESULTS_DIR / "zbp_summary.csv"
+    if not summary_file.exists():
+        print(f"  ZBP summary file not found: {summary_file}")
+        return None
+    
+    print(f"  Loading ZBP summary from: {summary_file}")
+    summary_df = pd.read_csv(summary_file)
+    
+    # Find matching entry
+    mask = (
+        (summary_df['portfolio_type'] == portfolio_type) &
+        (summary_df['start_year'] == start_year) &
+        (summary_df['end_year'] == end_year) &
+        (summary_df['rra'] == rra) &
+        (summary_df['allow_short_selling'] == allow_short_selling) &
+        (summary_df['on_frontier'] == on_frontier)
+    )
+    
+    if not mask.any():
+        print(f"  No matching ZBP entry found in summary")
+        return None
+    
+    return summary_df[mask].iloc[0]
+
+
 def plot_ios_and_msmp(ios_df, ios_summary, msmp_summary=None, optimal_crra_summary=None,
-                      portfolio_type=None, start_year=None, end_year=None,
+                      zbp_summary=None, portfolio_type=None, start_year=None, end_year=None,
                       figsize=(12, 8)):
     """
     Plot Investment Opportunity Set curve and MSMP point
@@ -181,6 +230,10 @@ def plot_ios_and_msmp(ios_df, ios_summary, msmp_summary=None, optimal_crra_summa
         IOS summary row
     msmp_summary : pd.Series or None
         MSMP summary row (optional)
+    optimal_crra_summary : pd.Series or None
+        Optimal CRRA summary row (optional)
+    zbp_summary : pd.Series or None
+        Zero-Beta Portfolio summary row (optional)
     portfolio_type : str
         Portfolio type for title
     start_year : int
@@ -245,6 +298,14 @@ def plot_ios_and_msmp(ios_df, ios_summary, msmp_summary=None, optimal_crra_summa
                   c='green', s=200, marker='o', edgecolors='black', linewidths=1.5,
                   label=f'Optimal CRRA (RRA={rra:.1f}, R={opt_return:.4f}, σ={opt_vol:.2%})', zorder=5)
     
+    # Plot Zero-Beta Portfolio if available
+    if zbp_summary is not None:
+        zbp_return = zbp_summary['expected_return_gross']
+        zbp_vol = zbp_summary['volatility']
+        ax.scatter([zbp_vol], [zbp_return],
+                  c='orange', s=200, marker='s', edgecolors='black', linewidths=1.5,
+                  label=f'ZBP (R={zbp_return:.4f}, σ={zbp_vol:.2%})', zorder=5)
+    
     # Labels and formatting
     ax.set_xlabel('Volatility (σ)', fontsize=12, fontweight='bold')
     ax.set_ylabel('Expected Return (R)', fontsize=12, fontweight='bold')
@@ -256,6 +317,8 @@ def plot_ios_and_msmp(ios_df, ios_summary, msmp_summary=None, optimal_crra_summa
             title_parts.append('MSMP')
         if optimal_crra_summary is not None:
             title_parts.append('Optimal CRRA')
+        if zbp_summary is not None:
+            title_parts.append('ZBP')
         title = f"{', '.join(title_parts)}\n{portfolio_type.upper()} Portfolios ({start_year}-{end_year})"
     else:
         title = 'Investment Opportunity Set'
@@ -263,6 +326,8 @@ def plot_ios_and_msmp(ios_df, ios_summary, msmp_summary=None, optimal_crra_summa
             title += ' and MSMP'
         if optimal_crra_summary is not None:
             title += ' and Optimal CRRA'
+        if zbp_summary is not None:
+            title += ' and ZBP'
     ax.set_title(title, fontsize=14, fontweight='bold')
     
     # Grid
@@ -281,7 +346,7 @@ def plot_ios_and_msmp(ios_df, ios_summary, msmp_summary=None, optimal_crra_summa
     min_ret = 0.0
     max_ret = frontier_returns.max() * 1.1
     
-    # Extend if MSMP or optimal CRRA is outside current range
+    # Extend if MSMP, optimal CRRA, or ZBP is outside current range
     if msmp_summary is not None:
         max_vol = max(max_vol, msmp_summary['volatility'] * 1.1)
         max_ret = max(max_ret, msmp_summary['expected_return_gross'] * 1.1)
@@ -291,6 +356,11 @@ def plot_ios_and_msmp(ios_df, ios_summary, msmp_summary=None, optimal_crra_summa
         max_vol = max(max_vol, optimal_crra_summary['volatility'] * 1.1)
         max_ret = max(max_ret, optimal_crra_summary['expected_return_gross'] * 1.1)
         min_ret = min(min_ret, optimal_crra_summary['expected_return_gross'] * 1.1)
+    
+    if zbp_summary is not None:
+        max_vol = max(max_vol, zbp_summary['volatility'] * 1.1)
+        max_ret = max(max_ret, zbp_summary['expected_return_gross'] * 1.1)
+        min_ret = min(min_ret, zbp_summary['expected_return_gross'] * 1.1)
     
     ax.set_xlim(min_vol, max_vol)
     ax.set_ylim(min_ret, max_ret)
@@ -377,10 +447,22 @@ def main():
     else:
         print(f"  No optimal CRRA data found (RRA={args.rra})")
     
+    # Load ZBP data
+    print("\nLoading ZBP data...")
+    print(f"  ZBP summary file: {RESULTS_DIR / 'zbp_summary.csv'}")
+    zbp_summary = load_zbp_data(
+        args.portfolio_type, args.start_year, args.end_year, args.rra, allow_short, on_frontier=True
+    )
+    if zbp_summary is not None:
+        print(f"  Found ZBP: R={zbp_summary['expected_return_gross']:.6f}, "
+              f"σ={zbp_summary['volatility']:.4%}")
+    else:
+        print(f"  No ZBP data found")
+    
     # Plot
     print("\nGenerating plot...")
     fig, ax = plot_ios_and_msmp(
-        ios_df, ios_summary, msmp_summary, optimal_crra_summary,
+        ios_df, ios_summary, msmp_summary, optimal_crra_summary, zbp_summary,
         args.portfolio_type, args.start_year, args.end_year
     )
     
