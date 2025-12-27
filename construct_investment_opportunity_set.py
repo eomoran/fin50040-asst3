@@ -117,7 +117,7 @@ def compute_moments(returns):
     return mu, Sigma, portfolio_names
 
 
-def construct_investment_opportunity_set(mu, Sigma, num_portfolios=200):
+def construct_investment_opportunity_set(mu, Sigma, num_portfolios=200, allow_short_selling=True):
     """
     Construct the Investment Opportunity Set (mean-variance frontier)
     
@@ -185,7 +185,14 @@ def construct_investment_opportunity_set(mu, Sigma, num_portfolios=200):
             {'type': 'eq', 'fun': lambda w: mu.T @ w - target_return}  # Return constraint
         ]
         
-        bounds = [(-1, 1) for _ in range(n)]  # Allow short selling
+        # Set bounds based on short selling constraint
+        if allow_short_selling:
+            # "Free portfolio" means short selling is allowed
+            # Bounds: weights can be between -1 and 1 (allows short selling)
+            bounds = [(-1, 1) for _ in range(n)]
+        else:
+            # No short selling: weights must be >= 0
+            bounds = [(0, 1) for _ in range(n)]
         
         # Better initial guesses based on target return
         initial_guesses = []
@@ -417,7 +424,13 @@ def main():
     
     # Construct investment opportunity set
     print("\nConstructing investment opportunity set...")
-    frontier = construct_investment_opportunity_set(mu, Sigma, num_portfolios=args.num_portfolios)
+    allow_short = not args.no_short_selling
+    if allow_short:
+        print("  Short selling: ALLOWED (free portfolio)")
+    else:
+        print("  Short selling: NOT ALLOWED (long-only)")
+    frontier = construct_investment_opportunity_set(mu, Sigma, num_portfolios=args.num_portfolios, 
+                                                     allow_short_selling=allow_short)
     
     # Save results
     print("\nSaving results...")
