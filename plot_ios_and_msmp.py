@@ -322,6 +322,10 @@ def main():
         help='Use long-only portfolios (default: free portfolio with short selling)'
     )
     parser.add_argument(
+        '--rra', type=float, default=4.0,
+        help='Relative Risk Aversion coefficient for optimal CRRA portfolio (default: 4.0)'
+    )
+    parser.add_argument(
         '--output-suffix', type=str, default='',
         help='Suffix to add to output filename (e.g., "_test")'
     )
