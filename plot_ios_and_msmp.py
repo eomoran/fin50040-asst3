@@ -121,7 +121,53 @@ def load_msmp_data(portfolio_type, start_year, end_year, allow_short_selling=Tru
     return summary_df[mask].iloc[0]
 
 
-def plot_ios_and_msmp(ios_df, ios_summary, msmp_summary=None,
+def load_optimal_crra_data(portfolio_type, start_year, end_year, rra=4.0, allow_short_selling=True):
+    """
+    Load optimal CRRA portfolio data from summary CSV
+    
+    Parameters:
+    -----------
+    portfolio_type : str
+        'size' or 'value'
+    start_year : int
+        Start year
+    end_year : int
+        End year
+    rra : float
+        Relative Risk Aversion coefficient (default: 4.0)
+    allow_short_selling : bool
+        Whether short selling was allowed
+    
+    Returns:
+    --------
+    optimal_crra_summary : pd.Series
+        Summary row from optimal_crra_summary.csv, or None if not found
+    """
+    summary_file = RESULTS_DIR / "optimal_crra_summary.csv"
+    if not summary_file.exists():
+        print(f"  Optimal CRRA summary file not found: {summary_file}")
+        return None
+    
+    print(f"  Loading optimal CRRA summary from: {summary_file}")
+    summary_df = pd.read_csv(summary_file)
+    
+    # Find matching entry
+    mask = (
+        (summary_df['portfolio_type'] == portfolio_type) &
+        (summary_df['start_year'] == start_year) &
+        (summary_df['end_year'] == end_year) &
+        (summary_df['rra'] == rra) &
+        (summary_df['allow_short_selling'] == allow_short_selling)
+    )
+    
+    if not mask.any():
+        print(f"  No matching optimal CRRA entry found in summary")
+        return None
+    
+    return summary_df[mask].iloc[0]
+
+
+def plot_ios_and_msmp(ios_df, ios_summary, msmp_summary=None, optimal_crra_summary=None,
                       portfolio_type=None, start_year=None, end_year=None,
                       figsize=(12, 8)):
     """
@@ -196,9 +242,18 @@ def plot_ios_and_msmp(ios_df, ios_summary, msmp_summary=None,
     
     # Title
     if portfolio_type and start_year and end_year:
-        title = f'Investment Opportunity Set and MSMP\n{portfolio_type.upper()} Portfolios ({start_year}-{end_year})'
+        title_parts = ['Investment Opportunity Set']
+        if msmp_summary is not None:
+            title_parts.append('MSMP')
+        if optimal_crra_summary is not None:
+            title_parts.append('Optimal CRRA')
+        title = f"{', '.join(title_parts)}\n{portfolio_type.upper()} Portfolios ({start_year}-{end_year})"
     else:
-        title = 'Investment Opportunity Set and MSMP'
+        title = 'Investment Opportunity Set'
+        if msmp_summary is not None:
+            title += ' and MSMP'
+        if optimal_crra_summary is not None:
+            title += ' and Optimal CRRA'
     ax.set_title(title, fontsize=14, fontweight='bold')
     
     # Grid
@@ -217,11 +272,16 @@ def plot_ios_and_msmp(ios_df, ios_summary, msmp_summary=None,
     min_ret = 0.0
     max_ret = frontier_returns.max() * 1.1
     
-    # Extend if MSMP is outside current range
+    # Extend if MSMP or optimal CRRA is outside current range
     if msmp_summary is not None:
         max_vol = max(max_vol, msmp_summary['volatility'] * 1.1)
         max_ret = max(max_ret, msmp_summary['expected_return_gross'] * 1.1)
         min_ret = min(min_ret, msmp_summary['expected_return_gross'] * 1.1)
+    
+    if optimal_crra_summary is not None:
+        max_vol = max(max_vol, optimal_crra_summary['volatility'] * 1.1)
+        max_ret = max(max_ret, optimal_crra_summary['expected_return_gross'] * 1.1)
+        min_ret = min(min_ret, optimal_crra_summary['expected_return_gross'] * 1.1)
     
     ax.set_xlim(min_vol, max_vol)
     ax.set_ylim(min_ret, max_ret)
@@ -290,12 +350,24 @@ def main():
         print(f"  Found MSMP: R={msmp_summary['expected_return_gross']:.6f}, "
               f"σ={msmp_summary['volatility']:.4%}")
     else:
-        print("  No MSMP data found (will plot IOS only)")
+        print("  No MSMP data found")
+    
+    # Load optimal CRRA data
+    print("\nLoading optimal CRRA data...")
+    print(f"  Optimal CRRA summary file: {RESULTS_DIR / 'optimal_crra_summary.csv'}")
+    optimal_crra_summary = load_optimal_crra_data(
+        args.portfolio_type, args.start_year, args.end_year, args.rra, allow_short
+    )
+    if optimal_crra_summary is not None:
+        print(f"  Found optimal CRRA (RRA={args.rra}): R={optimal_crra_summary['expected_return_gross']:.6f}, "
+              f"σ={optimal_crra_summary['volatility']:.4%}")
+    else:
+        print(f"  No optimal CRRA data found (RRA={args.rra})")
     
     # Plot
     print("\nGenerating plot...")
     fig, ax = plot_ios_and_msmp(
-        ios_df, ios_summary, msmp_summary,
+        ios_df, ios_summary, msmp_summary, optimal_crra_summary,
         args.portfolio_type, args.start_year, args.end_year
     )
     
