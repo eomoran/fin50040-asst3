@@ -16,11 +16,14 @@ import numpy as np
 from pathlib import Path
 from scipy.optimize import minimize
 import argparse
+import matplotlib.pyplot as plt
 
 # Directories
 DATA_DIR = Path("data/processed")
 RESULTS_DIR = Path("results")
 RESULTS_DIR.mkdir(exist_ok=True)
+PLOTS_DIR = Path("plots")
+PLOTS_DIR.mkdir(exist_ok=True)
 
 
 def load_portfolio_returns(portfolio_type, start_year, end_year):
@@ -247,6 +250,117 @@ def construct_investment_opportunity_set(mu, Sigma, num_portfolios=200):
     }
 
 
+def plot_investment_opportunity_set(frontier, mu, Sigma, portfolio_names, 
+                                    portfolio_type, start_year, end_year,
+                                    show_individual_assets=True, figsize=(12, 8)):
+    """
+    Plot the Investment Opportunity Set (mean-variance frontier)
+    
+    Parameters:
+    -----------
+    frontier : dict
+        Dictionary with 'returns', 'volatilities', 'weights'
+    mu : np.array
+        Mean gross returns
+    Sigma : np.array
+        Covariance matrix
+    portfolio_names : list
+        Portfolio names
+    portfolio_type : str
+        'size' or 'value'
+    start_year : int
+        Start year
+    end_year : int
+        End year
+    show_individual_assets : bool
+        Whether to show individual asset portfolios
+    figsize : tuple
+        Figure size
+    """
+    # Sort frontier by volatility for proper plotting (U-shape)
+    sort_idx = np.argsort(frontier['volatilities'])
+    frontier_vols_sorted = frontier['volatilities'][sort_idx]
+    frontier_returns_sorted = frontier['returns'][sort_idx]
+    
+    # Convert gross returns to net returns for display
+    frontier_returns_net = frontier_returns_sorted - 1
+    
+    # Find MVP
+    mvp_idx = np.argmin(frontier_vols_sorted)
+    mvp_return_net = frontier_returns_net[mvp_idx]
+    mvp_vol = frontier_vols_sorted[mvp_idx]
+    
+    # Individual asset returns and volatilities
+    if show_individual_assets:
+        asset_returns_net = mu - 1
+        asset_vols = np.sqrt(np.diag(Sigma))
+    
+    # Create figure
+    fig, ax = plt.subplots(figsize=figsize)
+    
+    # Plot investment opportunity set
+    ax.plot(frontier_vols_sorted, frontier_returns_net, 
+            'b-', linewidth=2, label='Investment Opportunity Set', alpha=0.7, zorder=2)
+    
+    # Plot individual assets (if requested)
+    if show_individual_assets:
+        ax.scatter(asset_vols, asset_returns_net, 
+                  c='gray', s=50, alpha=0.5, label='Individual Assets', zorder=1)
+    
+    # Plot MVP
+    ax.scatter([mvp_vol], [mvp_return_net],
+              c='purple', s=200, marker='^', edgecolors='black', linewidths=1.5,
+              label=f'MVP (R={mvp_return_net:.2%}, σ={mvp_vol:.2%})', zorder=5)
+    
+    # Labels and formatting
+    ax.set_xlabel('Volatility (σ)', fontsize=12, fontweight='bold')
+    ax.set_ylabel('Expected Return (r)', fontsize=12, fontweight='bold')
+    
+    # Title
+    title = f'Investment Opportunity Set\n{portfolio_type.upper()} Portfolios ({start_year}-{end_year})'
+    ax.set_title(title, fontsize=14, fontweight='bold')
+    
+    # Grid
+    ax.grid(True, alpha=0.3, linestyle='--')
+    
+    # Legend
+    ax.legend(loc='best', fontsize=10, framealpha=0.9)
+    
+    # Format axes as percentages
+    ax.xaxis.set_major_formatter(plt.FuncFormatter(lambda x, p: f'{x:.1%}'))
+    ax.yaxis.set_major_formatter(plt.FuncFormatter(lambda x, p: f'{x:.1%}'))
+    
+    # Adjust limits to ensure full U-shape is visible
+    min_vol = frontier_vols_sorted.min() * 0.9
+    max_vol = frontier_vols_sorted.max() * 1.1
+    min_ret = frontier_returns_net.min() * 1.1
+    max_ret = frontier_returns_net.max() * 1.1
+    
+    if show_individual_assets:
+        min_vol = min(min_vol, asset_vols.min() * 0.9)
+        max_vol = max(max_vol, asset_vols.max() * 1.1)
+        min_ret = min(min_ret, asset_returns_net.min() * 1.1)
+        max_ret = max(max_ret, asset_returns_net.max() * 1.1)
+    
+    ax.set_xlim(min_vol, max_vol)
+    ax.set_ylim(min_ret, max_ret)
+    
+    plt.tight_layout()
+    
+    # Save figure
+    suffix = f"_{portfolio_type}_{start_year}_{end_year}"
+    filename = PLOTS_DIR / f'investment_opportunity_set{suffix}.png'
+    plt.savefig(filename, dpi=300, bbox_inches='tight')
+    print(f"  Saved plot to {filename}")
+    
+    # Also save as PDF for high quality
+    filename_pdf = PLOTS_DIR / f'investment_opportunity_set{suffix}.pdf'
+    plt.savefig(filename_pdf, bbox_inches='tight')
+    print(f"  Saved plot to {filename_pdf}")
+    
+    plt.close(fig)  # Close the figure to free memory
+
+
 def main():
     parser = argparse.ArgumentParser(
         description='Construct Investment Opportunity Set (Mean-Variance Frontier)'
@@ -271,6 +385,14 @@ def main():
     parser.add_argument(
         '--output-suffix', type=str, default='',
         help='Suffix to add to output filename (e.g., "_test")'
+    )
+    parser.add_argument(
+        '--plot', action='store_true',
+        help='Generate and save plot of the investment opportunity set'
+    )
+    parser.add_argument(
+        '--no-individual-assets', action='store_true',
+        help='Hide individual asset portfolios on the plot'
     )
     
     args = parser.parse_args()
@@ -317,6 +439,15 @@ def main():
     )
     weights_df.to_csv(RESULTS_DIR / f"ios_weights{suffix}.csv", index=False)
     print(f"  Saved: ios_weights{suffix}.csv")
+    
+    # Plot if requested
+    if args.plot:
+        print("\nGenerating plot...")
+        plot_investment_opportunity_set(
+            frontier, mu, Sigma, portfolio_names,
+            args.portfolio_type, args.start_year, args.end_year,
+            show_individual_assets=not args.no_individual_assets
+        )
     
     # Print summary
     print("\n" + "=" * 70)
