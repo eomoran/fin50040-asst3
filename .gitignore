@@ -33,3 +33,8 @@ Thumbs.db
 *.xlsx
 *.xls
 
+# Plots
+plots/
+*.png
+*.pdf
+
