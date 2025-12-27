@@ -420,6 +420,10 @@ def main():
         '--no-individual-assets', action='store_true',
         help='Hide individual asset portfolios on the plot'
     )
+    parser.add_argument(
+        '--no-short-selling', action='store_true',
+        help='Restrict weights to be >= 0 (no short selling)'
+    )
     
     args = parser.parse_args()
     
