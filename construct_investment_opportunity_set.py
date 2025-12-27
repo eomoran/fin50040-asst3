@@ -257,9 +257,19 @@ def construct_investment_opportunity_set(mu, Sigma, num_portfolios=200, allow_sh
         
         for w0 in initial_guesses:
             try:
+                # Try SLSQP first
                 result = minimize(objective, w0, method='SLSQP',
                                  bounds=bounds, constraints=constraints,
                                  options={'maxiter': 2000, 'ftol': 1e-9})
+                
+                if not result.success or abs(mu.T @ result.x - target_return) > 1e-4:
+                    # If SLSQP fails or doesn't meet return constraint, try trust-constr
+                    try:
+                        result = minimize(objective, w0, method='trust-constr',
+                                         bounds=bounds, constraints=constraints,
+                                         options={'maxiter': 2000})
+                    except:
+                        continue
                 
                 if result.success:
                     # Verify constraints
