@@ -17,6 +17,9 @@ from pathlib import Path
 from scipy.optimize import minimize
 import argparse
 import matplotlib.pyplot as plt
+from concurrent.futures import ProcessPoolExecutor, as_completed
+from functools import partial
+import multiprocessing as mp
 
 # Directories
 DATA_DIR = Path("data/processed")
@@ -117,7 +120,112 @@ def compute_moments(returns):
     return mu, Sigma, portfolio_names
 
 
-def construct_investment_opportunity_set(mu, Sigma, num_portfolios=200, allow_short_selling=True):
+def optimize_single_portfolio(args_tuple):
+    """
+    Optimize a single portfolio for a given target return.
+    This function is designed to be called in parallel.
+    
+    Parameters:
+    -----------
+    args_tuple : tuple
+        (target_return, mu, Sigma, w_mvp, mu_mvp, allow_short_selling, n)
+    
+    Returns:
+    --------
+    result : dict or None
+        Dictionary with 'return', 'vol', 'weights' if successful, None otherwise
+    """
+    target_return, mu, Sigma, w_mvp, mu_mvp, allow_short_selling, n = args_tuple
+    
+    def objective(w):
+        return w.T @ Sigma @ w
+    
+    constraints = [
+        {'type': 'eq', 'fun': lambda w: np.sum(w) - 1},
+        {'type': 'eq', 'fun': lambda w: mu.T @ w - target_return}
+    ]
+    
+    if allow_short_selling:
+        bounds = [(-1, 2) for _ in range(n)]
+    else:
+        bounds = [(0, 1) for _ in range(n)]
+    
+    initial_guesses = []
+    if target_return < mu_mvp:
+        high_return_indices = np.argsort(mu)[-3:]
+        low_return_indices = np.argsort(mu)[:3]
+        
+        for short_frac in [0.3, 0.5, 0.7]:
+            w_ineff = np.zeros(n)
+            for idx in high_return_indices:
+                w_ineff[idx] = -short_frac / len(high_return_indices)
+            long_weight = 1 - np.sum(w_ineff)
+            for idx in low_return_indices:
+                w_ineff[idx] += long_weight / len(low_return_indices)
+            
+            if np.all(w_ineff >= -1) and np.all(w_ineff <= 2):
+                initial_guesses.append(w_ineff)
+        
+        w_neg = -w_mvp.copy()
+        if np.abs(np.sum(w_neg)) > 1e-10:
+            w_neg = w_neg / np.sum(w_neg)
+            if np.all(w_neg >= -1) and np.all(w_neg <= 2):
+                initial_guesses.append(w_neg)
+        
+        high_return_idx = np.argmax(mu)
+        w_short = np.zeros(n)
+        w_short[high_return_idx] = -0.8
+        low_return_idx = np.argmin(mu)
+        w_short[low_return_idx] = 1.8
+        if np.all(w_short >= -1) and np.all(w_short <= 2):
+            initial_guesses.append(w_short)
+    else:
+        initial_guesses.append(w_mvp.copy())
+    
+    initial_guesses.append(np.ones(n) / n)
+    
+    best_result = None
+    best_variance = np.inf
+    
+    for w0 in initial_guesses:
+        try:
+            result = minimize(objective, w0, method='SLSQP',
+                             bounds=bounds, constraints=constraints,
+                             options={'maxiter': 2000, 'ftol': 1e-9})
+            
+            if not result.success or abs(mu.T @ result.x - target_return) > 1e-4:
+                try:
+                    result = minimize(objective, w0, method='trust-constr',
+                                     bounds=bounds, constraints=constraints,
+                                     options={'maxiter': 2000})
+                except:
+                    continue
+            
+            if result.success:
+                budget_check = abs(np.sum(result.x) - 1)
+                return_check = abs(mu.T @ result.x - target_return)
+                
+                if budget_check < 1e-5 and return_check < 1e-5:
+                    if result.fun < best_variance:
+                        best_result = result
+                        best_variance = result.fun
+        except:
+            continue
+    
+    if best_result is not None:
+        w = best_result.x
+        portfolio_return = mu.T @ w
+        portfolio_vol = np.sqrt(w.T @ Sigma @ w)
+        return {
+            'return': portfolio_return,
+            'vol': portfolio_vol,
+            'weights': w
+        }
+    
+    return None
+
+
+def construct_investment_opportunity_set(mu, Sigma, num_portfolios=200, allow_short_selling=True, n_jobs=None):
     """
     Construct the Investment Opportunity Set (mean-variance frontier)
     
@@ -157,10 +265,18 @@ def construct_investment_opportunity_set(mu, Sigma, num_portfolios=200, allow_sh
     # For the inefficient limb, we need to extend below MVP
     # The inefficient limb has higher volatility for the same or lower return
     # We'll search from well below MVP return to capture the full U-shape
-    # Note: mu_mvp is typically less than mu_min (MVP has lower return than some assets)
+    # Note: mu_mvp might be above or below mu_min depending on the data
     # We want to search BELOW MVP, so extend below mu_mvp
-    range_below_mvp = abs(mu_mvp - mu_min)  # Distance between MVP and min asset return
+    # Use a percentage-based approach to ensure we extend far enough
+    # Extend at least 5% below MVP, or use the distance to min asset if that's larger
+    range_below_mvp = max(
+        abs(mu_mvp - mu_min),  # Distance between MVP and min asset return
+        mu_mvp * 0.05  # At least 5% below MVP
+    )
     search_min = mu_mvp - range_below_mvp * 1.5  # Extend 1.5x the range below MVP
+    
+    # Ensure search_min is reasonable (not negative or too small)
+    search_min = max(search_min, mu_mvp * 0.90)  # At least 10% below MVP
     
     # Generate target returns covering both limbs
     # Inefficient limb: from search_min to MVP (below MVP)
@@ -179,120 +295,38 @@ def construct_investment_opportunity_set(mu, Sigma, num_portfolios=200, allow_sh
     print(f"  Constructing investment opportunity set with {len(target_returns)} target returns...")
     print(f"  MVP return (gross): {mu_mvp:.6f} (net: {mu_mvp - 1:.4%})")
     
+    # Determine number of parallel workers
+    if n_jobs is None:
+        n_jobs = max(1, mp.cpu_count() - 1)
+    print(f"  Using {n_jobs} parallel workers...")
+    
+    # Prepare arguments for parallel processing
+    args_list = [(tr, mu, Sigma, w_mvp, mu_mvp, allow_short_selling, n) 
+                 for tr in target_returns]
+    
+    frontier_returns = []
+    frontier_vols = []
+    frontier_weights = []
+    
+    # Process in parallel
     successful = 0
-    for i, target_return in enumerate(target_returns):
-        # Minimize variance subject to:
-        # 1. Budget constraint: sum(w) = 1
-        # 2. Return constraint: mu'w = target_return
+    with ProcessPoolExecutor(max_workers=n_jobs) as executor:
+        future_to_return = {executor.submit(optimize_single_portfolio, args): args[0] 
+                           for args in args_list}
         
-        def objective(w):
-            return w.T @ Sigma @ w
-        
-        constraints = [
-            {'type': 'eq', 'fun': lambda w: np.sum(w) - 1},  # Budget constraint
-            {'type': 'eq', 'fun': lambda w: mu.T @ w - target_return}  # Return constraint
-        ]
-        
-        # Set bounds based on short selling constraint
-        if allow_short_selling:
-            # "Free portfolio" means short selling is allowed
-            # Bounds: weights can be between -1 and 2
-            # If we short one asset (w = -1), we can use that money to go long in another (w = 2)
-            # The budget constraint (sum(w) = 1) ensures weights are valid
-            bounds = [(-1, 2) for _ in range(n)]
-        else:
-            # No short selling: weights must be >= 0
-            bounds = [(0, 1) for _ in range(n)]
-        
-        # Better initial guesses based on target return
-        initial_guesses = []
-        if target_return < mu_mvp:
-            # Inefficient part: we want portfolios with lower return but higher volatility
-            # Strategy: short high-return, low-volatility assets and go long low-return, high-volatility assets
+        completed = 0
+        for future in as_completed(future_to_return):
+            completed += 1
+            result = future.result()
             
-            # Find assets with highest returns (to short) and lowest returns (to go long)
-            high_return_indices = np.argsort(mu)[-3:]  # Top 3 highest return assets
-            low_return_indices = np.argsort(mu)[:3]    # Bottom 3 lowest return assets
+            if result is not None:
+                frontier_returns.append(result['return'])
+                frontier_vols.append(result['vol'])
+                frontier_weights.append(result['weights'])
+                successful += 1
             
-            # Try multiple strategies for inefficient limb
-            for short_frac in [0.3, 0.5, 0.7]:
-                w_ineff = np.zeros(n)
-                # Short high-return assets
-                for idx in high_return_indices:
-                    w_ineff[idx] = -short_frac / len(high_return_indices)
-                # Go long low-return assets (which tend to have higher volatility)
-                long_weight = 1 - np.sum(w_ineff)  # Remaining weight after shorting
-                for idx in low_return_indices:
-                    w_ineff[idx] += long_weight / len(low_return_indices)
-                
-                # Check bounds
-                if np.all(w_ineff >= -1) and np.all(w_ineff <= 2):
-                    initial_guesses.append(w_ineff)
-            
-            # Also try negative MVP (scaled and normalized)
-            w_neg = -w_mvp.copy()
-            if np.abs(np.sum(w_neg)) > 1e-10:
-                w_neg = w_neg / np.sum(w_neg)  # Normalize to sum to 1
-                # Check if within bounds (allows -1 to 2)
-                if np.all(w_neg >= -1) and np.all(w_neg <= 2):
-                    initial_guesses.append(w_neg)
-            
-            # Try a portfolio that heavily shorts the highest return asset
-            high_return_idx = np.argmax(mu)
-            w_short = np.zeros(n)
-            w_short[high_return_idx] = -0.8  # Short high return asset heavily
-            # Go long in lowest return assets
-            low_return_idx = np.argmin(mu)
-            w_short[low_return_idx] = 1.8  # Use proceeds from short to go long
-            if np.all(w_short >= -1) and np.all(w_short <= 2):
-                initial_guesses.append(w_short)
-        else:
-            # Efficient part: start from MVP
-            initial_guesses.append(w_mvp.copy())
-        
-        # Always include equal weights as fallback
-        initial_guesses.append(np.ones(n) / n)
-        
-        best_result = None
-        best_variance = np.inf
-        
-        for w0 in initial_guesses:
-            try:
-                # Try SLSQP first
-                result = minimize(objective, w0, method='SLSQP',
-                                 bounds=bounds, constraints=constraints,
-                                 options={'maxiter': 2000, 'ftol': 1e-9})
-                
-                if not result.success or abs(mu.T @ result.x - target_return) > 1e-4:
-                    # If SLSQP fails or doesn't meet return constraint, try trust-constr
-                    try:
-                        result = minimize(objective, w0, method='trust-constr',
-                                         bounds=bounds, constraints=constraints,
-                                         options={'maxiter': 2000})
-                    except:
-                        continue
-                
-                if result.success:
-                    # Verify constraints
-                    budget_check = abs(np.sum(result.x) - 1)
-                    return_check = abs(mu.T @ result.x - target_return)
-                    
-                    if budget_check < 1e-5 and return_check < 1e-5:
-                        if result.fun < best_variance:
-                            best_result = result
-                            best_variance = result.fun
-            except:
-                continue
-        
-        if best_result is not None:
-            w = best_result.x
-            portfolio_return = mu.T @ w
-            portfolio_vol = np.sqrt(w.T @ Sigma @ w)
-            
-            frontier_returns.append(portfolio_return)
-            frontier_vols.append(portfolio_vol)
-            frontier_weights.append(w)
-            successful += 1
+            if completed % 20 == 0:
+                print(f"  Progress: {completed}/{len(target_returns)} portfolios optimized ({successful} successful)")
     
     print(f"  Successfully constructed {successful}/{len(target_returns)} frontier points")
     
@@ -460,6 +494,10 @@ def main():
         '--no-short-selling', action='store_true',
         help='Restrict weights to be >= 0 (no short selling)'
     )
+    parser.add_argument(
+        '--n-jobs', type=int, default=None,
+        help='Number of parallel workers (default: CPU count - 1)'
+    )
     
     args = parser.parse_args()
     
@@ -489,7 +527,7 @@ def main():
     else:
         print("  Short selling: NOT ALLOWED (long-only)")
     frontier = construct_investment_opportunity_set(mu, Sigma, num_portfolios=args.num_portfolios, 
-                                                     allow_short_selling=allow_short)
+                                                     allow_short_selling=allow_short, n_jobs=args.n_jobs)
     
     # Save results
     print("\nSaving results...")

@@ -217,11 +217,101 @@ def load_zbp_data(portfolio_type, start_year, end_year, rra=4.0, allow_short_sel
     return summary_df[mask].iloc[0]
 
 
-def plot_ios_and_msmp(ios_df, ios_summary, msmp_summary=None, optimal_crra_summary=None,
+def load_risk_free_rate(start_year, end_year):
+    """
+    Load risk-free rate from Fama-French factors
+    
+    Parameters:
+    -----------
+    start_year : int
+        Start year
+    end_year : int
+        End year
+    
+    Returns:
+    --------
+    rf_mean : float
+        Mean risk-free rate (gross return R_f = 1 + r_f)
+    """
+    from pathlib import Path
+    DATA_DIR = Path("data/processed")
+    
+    # Find factors file
+    files = list(DATA_DIR.glob("*F-F_Research_Data_Factors*Annual*.csv"))
+    if not files:
+        return None
+    
+    factors = pd.read_csv(files[0], index_col=0, parse_dates=True)
+    factors = factors.loc[f'{start_year}-01-01':f'{end_year}-01-01']
+    factors = factors.dropna()
+    
+    if 'RF' not in factors.columns:
+        return None
+    
+    # RF is in gross returns (R_f = 1 + r_f)
+    rf_mean = factors['RF'].mean()
+    return rf_mean
+
+
+def plot_line_from_rf(ax, rf, portfolio_vol, portfolio_return, max_vol, reflect=False, 
+                      color='r', linestyle='--', linewidth=1.5, alpha=0.7, label=None, zorder=3):
+    """
+    Plot a line from risk-free rate (on y-axis) to a portfolio point
+    
+    Parameters:
+    -----------
+    ax : matplotlib.axes.Axes
+        Axes to plot on
+    rf : float
+        Risk-free rate (gross return, on y-axis at x=0)
+    portfolio_vol : float
+        Portfolio volatility (x-coordinate)
+    portfolio_return : float
+        Portfolio return (y-coordinate)
+    reflect : bool
+        If True, reflect the line along y=rf (for MSMP)
+    color : str
+        Line color
+    linestyle : str
+        Line style
+    linewidth : float
+        Line width
+    alpha : float
+        Transparency
+    label : str
+        Label for legend
+    """
+    if reflect:
+        # Reflect: if portfolio is at (σ, R), reflect to (σ, 2*R_f - R)
+        # The line goes from (0, R_f) to (σ, 2*R_f - R), then extend to frame edge
+        reflected_return = 2 * rf - portfolio_return
+        # Calculate slope from (0, R_f) to (σ, reflected_return)
+        if portfolio_vol > 1e-10:
+            slope = (reflected_return - rf) / portfolio_vol
+        else:
+            slope = 0
+        # Extend to frame edge
+        x_line = np.array([0.0, max_vol])
+        y_line = np.array([rf, rf + slope * max_vol])
+    else:
+        # Normal line from (0, R_f) to (σ, R), then extend to frame edge
+        if portfolio_vol > 1e-10:
+            slope = (portfolio_return - rf) / portfolio_vol
+        else:
+            slope = 0
+        # Extend to frame edge
+        x_line = np.array([0.0, max_vol])
+        y_line = np.array([rf, rf + slope * max_vol])
+    
+    ax.plot(x_line, y_line, color=color, linestyle=linestyle, 
+           linewidth=linewidth, alpha=alpha, label=label, zorder=zorder)
+
+
+def plot_portfolio_frontier(ios_df, ios_summary, msmp_summary=None, optimal_crra_summary=None,
                       zbp_summary=None, portfolio_type=None, start_year=None, end_year=None,
                       figsize=(12, 8)):
     """
-    Plot Investment Opportunity Set curve and MSMP point
+    Plot Investment Opportunity Set curve with key portfolios and tangent lines
     
     Parameters:
     -----------
@@ -251,24 +341,46 @@ def plot_ios_and_msmp(ios_df, ios_summary, msmp_summary=None, optimal_crra_summa
     mvp_vol = ios_df.loc[mvp_idx, 'volatility']
     
     # Separate limbs
+    # Inefficient: return < MVP return AND volatility > MVP volatility
+    # Efficient: everything else (including MVP itself)
     inefficient_mask = (ios_df['return_gross'] < mvp_return) & (ios_df['volatility'] > mvp_vol)
     efficient_mask = ~inefficient_mask
     
     # Sort each limb separately
+    # Inefficient: sort by volatility DESCENDING (from highest vol down to MVP)
     inefficient_df = ios_df[inefficient_mask].sort_values('volatility', ascending=False)
+    # Efficient: sort by volatility ASCENDING (from MVP up)
     efficient_df = ios_df[efficient_mask].sort_values('volatility', ascending=True)
     
     # Combine: inefficient -> MVP -> efficient
-    frontier_vols = np.concatenate([
-        inefficient_df['volatility'].values,
-        [mvp_vol],
-        efficient_df['volatility'].values
-    ])
-    frontier_returns = np.concatenate([
-        inefficient_df['return_gross'].values,
-        [mvp_return],
-        efficient_df['return_gross'].values
-    ])
+    # This creates the full U-shape with smooth connections
+    if len(inefficient_df) > 0:
+        # Ensure smooth connection: inefficient limb should end close to MVP
+        # The last inefficient point should have volatility just above MVP
+        # We'll include MVP in the concatenation to ensure smooth connection
+        frontier_vols = np.concatenate([
+            inefficient_df['volatility'].values,
+            [mvp_vol],
+            efficient_df['volatility'].values
+        ])
+        frontier_returns = np.concatenate([
+            inefficient_df['return_gross'].values,
+            [mvp_return],
+            efficient_df['return_gross'].values
+        ])
+        print(f"  Plotting IOS: {len(inefficient_df)} inefficient + 1 MVP + {len(efficient_df)} efficient = {len(frontier_vols)} total points")
+        print(f"  Inefficient limb: vol range [{inefficient_df['volatility'].min():.4f}, {inefficient_df['volatility'].max():.4f}], return range [{inefficient_df['return_gross'].min():.4f}, {inefficient_df['return_gross'].max():.4f}]")
+    else:
+        # If no inefficient limb found, just plot efficient limb with MVP
+        print(f"  Warning: No inefficient limb found! Only plotting efficient limb.")
+        frontier_vols = np.concatenate([
+            [mvp_vol],
+            efficient_df['volatility'].values
+        ])
+        frontier_returns = np.concatenate([
+            [mvp_return],
+            efficient_df['return_gross'].values
+        ])
     
     # Create figure
     fig, ax = plt.subplots(figsize=figsize)
@@ -307,6 +419,64 @@ def plot_ios_and_msmp(ios_df, ios_summary, msmp_summary=None, optimal_crra_summa
                   c='orange', s=200, marker='s', edgecolors='black', linewidths=1.5,
                   label=f'ZBP (R={zbp_return:.4f}, σ={zbp_vol:.2%})', zorder=5)
     
+    # Calculate axis limits first (needed for tangent lines)
+    min_vol = 0.0
+    max_vol = frontier_vols.max() * 1.1
+    min_ret = 0.0
+    max_ret = frontier_returns.max() * 1.1
+    
+    # Extend if MSMP, optimal CRRA, or ZBP is outside current range
+    if msmp_summary is not None:
+        max_vol = max(max_vol, msmp_summary['volatility'] * 1.1)
+        max_ret = max(max_ret, msmp_summary['expected_return_gross'] * 1.1)
+        min_ret = min(min_ret, msmp_summary['expected_return_gross'] * 1.1)
+    
+    if optimal_crra_summary is not None:
+        max_vol = max(max_vol, optimal_crra_summary['volatility'] * 1.1)
+        max_ret = max(max_ret, optimal_crra_summary['expected_return_gross'] * 1.1)
+        min_ret = min(min_ret, optimal_crra_summary['expected_return_gross'] * 1.1)
+    
+    if zbp_summary is not None:
+        max_vol = max(max_vol, zbp_summary['volatility'] * 1.1)
+        max_ret = max(max_ret, zbp_summary['expected_return_gross'] * 1.1)
+        min_ret = min(min_ret, zbp_summary['expected_return_gross'] * 1.1)
+    
+    # Load risk-free rate
+    rf = None
+    if start_year and end_year:
+        rf = load_risk_free_rate(start_year, end_year)
+        if rf is not None:
+            print(f"  Risk-free rate (mean): R_f = {rf:.6f} (net: {(rf-1)*100:.4f}%)")
+    
+    # Plot lines from R_f to portfolios
+    # These represent the convex space from allocating between long/short positions
+    # in the portfolio and the risk-free asset
+    
+    # Line from R_f to Optimal CRRA Portfolio (black dashed)
+    if optimal_crra_summary is not None and rf is not None:
+        opt_return = optimal_crra_summary['expected_return_gross']
+        opt_vol = optimal_crra_summary['volatility']
+        plot_line_from_rf(ax, rf, opt_vol, opt_return, max_vol, reflect=False, 
+                          color='black', linestyle='--', label='R_f ↔ Optimal CRRA', zorder=3)
+    
+    # Line from R_f to ZBP (black dashed)
+    if zbp_summary is not None and rf is not None:
+        zbp_return = zbp_summary['expected_return_gross']
+        zbp_vol = zbp_summary['volatility']
+        plot_line_from_rf(ax, rf, zbp_vol, zbp_return, max_vol, reflect=False,
+                          color='black', linestyle='--', label='R_f ↔ ZBP', zorder=3)
+    
+    # Lines from R_f to MSMP: both normal and reflected (red solid)
+    if msmp_summary is not None and rf is not None:
+        msmp_return = msmp_summary['expected_return_gross']
+        msmp_vol = msmp_summary['volatility']
+        # Normal line from R_f to MSMP
+        plot_line_from_rf(ax, rf, msmp_vol, msmp_return, max_vol, reflect=False,
+                          color='r', linestyle='-', label='R_f ↔ MSMP', zorder=3)
+        # Reflected line from R_f to MSMP (reflected along y=R_f)
+        plot_line_from_rf(ax, rf, msmp_vol, msmp_return, max_vol, reflect=True,
+                          color='r', linestyle='-', label='R_f ↔ MSMP (reflected)', zorder=3)
+    
     # Labels and formatting
     ax.set_xlabel('Volatility (σ)', fontsize=12, fontweight='bold')
     ax.set_ylabel('Expected Return (R)', fontsize=12, fontweight='bold')
@@ -341,30 +511,15 @@ def plot_ios_and_msmp(ios_df, ios_summary, msmp_summary=None, optimal_crra_summa
     ax.xaxis.set_major_formatter(plt.FuncFormatter(lambda x, p: f'{x:.1%}'))
     ax.yaxis.set_major_formatter(plt.FuncFormatter(lambda x, p: f'{x:.3f}'))
     
-    # Adjust limits: x and y mins fixed at zero, maxes with padding
-    min_vol = 0.0
-    max_vol = frontier_vols.max() * 1.1
-    min_ret = 0.0
-    max_ret = frontier_returns.max() * 1.1
-    
-    # Extend if MSMP, optimal CRRA, or ZBP is outside current range
-    if msmp_summary is not None:
-        max_vol = max(max_vol, msmp_summary['volatility'] * 1.1)
-        max_ret = max(max_ret, msmp_summary['expected_return_gross'] * 1.1)
-        min_ret = min(min_ret, msmp_summary['expected_return_gross'] * 1.1)
-    
-    if optimal_crra_summary is not None:
-        max_vol = max(max_vol, optimal_crra_summary['volatility'] * 1.1)
-        max_ret = max(max_ret, optimal_crra_summary['expected_return_gross'] * 1.1)
-        min_ret = min(min_ret, optimal_crra_summary['expected_return_gross'] * 1.1)
-    
-    if zbp_summary is not None:
-        max_vol = max(max_vol, zbp_summary['volatility'] * 1.1)
-        max_ret = max(max_ret, zbp_summary['expected_return_gross'] * 1.1)
-        min_ret = min(min_ret, zbp_summary['expected_return_gross'] * 1.1)
-    
+    # Set axis limits (already calculated above)
     ax.set_xlim(min_vol, max_vol)
     ax.set_ylim(min_ret, max_ret)
+    
+    # Label R_f on y-axis if available
+    if rf is not None:
+        ax.axhline(y=rf, color='gray', linestyle=':', linewidth=1, alpha=0.5, zorder=1)
+        ax.text(-0.02 * max_vol, rf, 'R_f', fontsize=10, ha='right', va='center',
+               bbox=dict(boxstyle='round,pad=0.3', facecolor='white', alpha=0.8, edgecolor='gray'))
     
     plt.tight_layout()
     
@@ -373,7 +528,7 @@ def plot_ios_and_msmp(ios_df, ios_summary, msmp_summary=None, optimal_crra_summa
 
 def main():
     parser = argparse.ArgumentParser(
-        description='Plot Investment Opportunity Set and MSMP together'
+        description='Plot Investment Opportunity Set with key portfolios and tangent lines'
     )
     parser.add_argument(
         '--portfolio-type', type=str, required=True,
@@ -462,18 +617,18 @@ def main():
     
     # Plot
     print("\nGenerating plot...")
-    fig, ax = plot_ios_and_msmp(
+    fig, ax = plot_portfolio_frontier(
         ios_df, ios_summary, msmp_summary, optimal_crra_summary, zbp_summary,
         args.portfolio_type, args.start_year, args.end_year
     )
     
     # Save plot
     suffix = f"_{args.portfolio_type}_{args.start_year}_{args.end_year}{args.output_suffix}"
-    filename = PLOTS_DIR / f'ios_and_msmp{suffix}.png'
+    filename = PLOTS_DIR / f'portfolio_frontier{suffix}.png'
     plt.savefig(filename, dpi=300, bbox_inches='tight')
     print(f"  Saved plot to {filename}")
     
-    filename_pdf = PLOTS_DIR / f'ios_and_msmp{suffix}.pdf'
+    filename_pdf = PLOTS_DIR / f'portfolio_frontier{suffix}.pdf'
     plt.savefig(filename_pdf, bbox_inches='tight')
     print(f"  Saved plot to {filename_pdf}")
     
