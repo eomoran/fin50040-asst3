@@ -110,7 +110,7 @@ def compute_moments(returns):
     return mu, Sigma, portfolio_names
 
 
-def find_optimal_crra_portfolio(mu, Sigma, rra=4, allow_short_selling=True):
+def find_optimal_crra_portfolio(mu, Sigma, rra=4, allow_short_selling=True, closed_form=False):
     """
     Find optimal portfolio for CRRA investor
     
@@ -129,6 +129,9 @@ def find_optimal_crra_portfolio(mu, Sigma, rra=4, allow_short_selling=True):
         Relative Risk Aversion coefficient (default: 4)
     allow_short_selling : bool
         If True, allows negative weights (free portfolio)
+    closed_form : bool
+        If True, use closed-form solution using Lagrange multipliers
+        If False, use optimization
     
     Returns:
     --------
@@ -141,38 +144,67 @@ def find_optimal_crra_portfolio(mu, Sigma, rra=4, allow_short_selling=True):
     """
     n = len(mu)
     
-    # Maximize μ'w - (γ/2) * w'Σw
-    # Equivalent to minimizing: (γ/2) * w'Σw - μ'w
-    def objective(w):
-        return (rra / 2) * (w.T @ Sigma @ w) - mu.T @ w
+    if closed_form:
+        # Closed-form solution using Lagrange multipliers
+        # Maximize: μ'w - (γ/2) * w'Σw subject to 1'w = 1
+        # Solution: w = (1/γ) * Σ^-1 * (μ + λ1)
+        # where λ = (γ - 1'Σ^-1μ) / (1'Σ^-11)
+        ones = np.ones(n)
+        try:
+            inv_Sigma = np.linalg.inv(Sigma)
+        except np.linalg.LinAlgError:
+            inv_Sigma = np.linalg.pinv(Sigma)
+        
+        # Compute constants
+        ones_inv_Sigma = ones.T @ inv_Sigma
+        mu_inv_Sigma = mu.T @ inv_Sigma
+        
+        # Lambda multiplier
+        lambda_val = (rra - mu_inv_Sigma @ ones) / (ones_inv_Sigma @ ones)
+        
+        # Optimal weights
+        w_opt = (1 / rra) * inv_Sigma @ (mu + lambda_val * ones)
+        
+        # If short selling not allowed, we'd need to check and adjust
+        if not allow_short_selling:
+            if np.any(w_opt < 0):
+                print("  Warning: Closed-form solution has negative weights but short selling not allowed.")
+                print("  Falling back to optimization with bounds...")
+                closed_form = False
     
-    constraints = {'type': 'eq', 'fun': lambda w: np.sum(w) - 1}
-    
-    # Set bounds based on short selling constraint
-    if allow_short_selling:
-        # "Free portfolio" means short selling is allowed
-        # Bounds: weights can be between -1 and 2 (allows shorting one asset to go long in another)
-        bounds = [(-1, 2) for _ in range(n)]
-    else:
-        # No short selling: weights must be >= 0
-        bounds = [(0, 1) for _ in range(n)]
-    
-    w0 = np.ones(n) / n
-    
-    result = minimize(objective, w0, method='SLSQP',
-                     bounds=bounds, constraints=constraints,
-                     options={'maxiter': 2000, 'ftol': 1e-9})
-    
-    if not result.success:
-        # Try trust-constr as fallback
-        result = minimize(objective, w0, method='trust-constr',
+    if not closed_form:
+        # Maximize μ'w - (γ/2) * w'Σw
+        # Equivalent to minimizing: (γ/2) * w'Σw - μ'w
+        def objective(w):
+            return (rra / 2) * (w.T @ Sigma @ w) - mu.T @ w
+        
+        constraints = {'type': 'eq', 'fun': lambda w: np.sum(w) - 1}
+        
+        # Set bounds based on short selling constraint
+        if allow_short_selling:
+            # "Free portfolio" means short selling is allowed
+            # Bounds: weights can be between -1 and 2 (allows shorting one asset to go long in another)
+            bounds = [(-1, 2) for _ in range(n)]
+        else:
+            # No short selling: weights must be >= 0
+            bounds = [(0, 1) for _ in range(n)]
+        
+        w0 = np.ones(n) / n
+        
+        result = minimize(objective, w0, method='SLSQP',
                          bounds=bounds, constraints=constraints,
-                         options={'maxiter': 2000, 'gtol': 1e-8})
-    
-    if not result.success:
-        raise ValueError(f"Failed to find optimal CRRA portfolio: {result.message}")
-    
-    w_opt = result.x
+                         options={'maxiter': 2000, 'ftol': 1e-9})
+        
+        if not result.success:
+            # Try trust-constr as fallback
+            result = minimize(objective, w0, method='trust-constr',
+                             bounds=bounds, constraints=constraints,
+                             options={'maxiter': 2000, 'gtol': 1e-8})
+        
+        if not result.success:
+            raise ValueError(f"Failed to find optimal CRRA portfolio: {result.message}")
+        
+        w_opt = result.x
     opt_return = mu.T @ w_opt  # E[w'R] (gross return)
     opt_vol = np.sqrt(w_opt.T @ Sigma @ w_opt)  # std(w'R)
     
@@ -208,6 +240,10 @@ def main():
         '--no-short-selling', action='store_true',
         help='Restrict portfolio weights to be non-negative (no short selling)'
     )
+    parser.add_argument(
+        '--closed-form', action='store_true',
+        help='Use closed-form analytical solution instead of optimization'
+    )
     
     args = parser.parse_args()
     
@@ -220,6 +256,7 @@ def main():
     
     allow_short = not args.no_short_selling
     print(f"Short selling: {'ALLOWED (free portfolio)' if allow_short else 'NOT ALLOWED (long-only)'}")
+    print(f"Method: {'CLOSED-FORM' if args.closed_form else 'OPTIMIZATION'}")
     print()
     
     # Load data
@@ -234,8 +271,10 @@ def main():
     
     # Find optimal CRRA portfolio
     print(f"\nFinding optimal CRRA portfolio (RRA={args.rra})...")
+    if args.closed_form:
+        print("  Using closed-form solution with Lagrange multipliers")
     w_opt, opt_return, opt_vol = find_optimal_crra_portfolio(
-        mu, Sigma, rra=args.rra, allow_short_selling=allow_short
+        mu, Sigma, rra=args.rra, allow_short_selling=allow_short, closed_form=args.closed_form
     )
     
     # Convert gross returns to net returns for display

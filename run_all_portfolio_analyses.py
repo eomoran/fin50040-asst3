@@ -99,6 +99,14 @@ def main():
         help='Relative Risk Aversion coefficient for optimal portfolio (default: 4.0)'
     )
     parser.add_argument(
+        '--on-frontier', action='store_true',
+        help='Constrain ZBP to be on the efficient frontier (default: False, just on IOS)'
+    )
+    parser.add_argument(
+        '--closed-form', action='store_true',
+        help='Use closed-form analytical solutions instead of optimization (default: False, use optimization)'
+    )
+    parser.add_argument(
         '--no-short-selling', action='store_true',
         help='Restrict portfolio weights to be non-negative (no short selling)'
     )
@@ -142,6 +150,8 @@ def main():
                 rra=args.rra,
                 no_short_selling=args.no_short_selling,
                 skip_plot=args.skip_plot,
+                on_frontier=args.on_frontier,
+                closed_form=args.closed_form,
                 all=False
             )
             
@@ -167,6 +177,8 @@ def main():
     print(f"Period: {args.start_year}-{args.end_year}")
     print(f"RRA: {args.rra}")
     print(f"Short selling: {'NOT ALLOWED' if args.no_short_selling else 'ALLOWED'}")
+    print(f"ZBP on frontier: {'YES' if args.on_frontier else 'NO (on IOS only)'}")
+    print(f"Method: {'CLOSED-FORM' if args.closed_form else 'OPTIMIZATION'}")
     print()
     
     success = run_all_steps(args)
@@ -204,21 +216,31 @@ def run_all_steps(args):
     
     # Step 1: Construct Investment Opportunity Set (no plotting)
     step1_args = common_args.copy()
+    if args.closed_form:
+        step1_args.append('--closed-form')
     if not run_script(SCRIPTS['ios'], step1_args, 1, 6):
         return False
     
     # Step 2: Find MSMP Portfolio
     step2_args = common_args.copy()
+    if args.closed_form:
+        step2_args.append('--closed-form')
     if not run_script(SCRIPTS['msmp'], step2_args, 2, 6):
         return False
     
     # Step 3: Find Optimal CRRA Portfolio
     step3_args = common_args.copy() + ['--rra', str(args.rra)]
+    if args.closed_form:
+        step3_args.append('--closed-form')
     if not run_script(SCRIPTS['optimal_crra'], step3_args, 3, 6):
         return False
     
     # Step 4: Find Zero-Beta Portfolio (depends on step 3)
     step4_args = common_args.copy() + ['--rra', str(args.rra)]
+    if args.on_frontier and not args.closed_form:
+        step4_args.append('--on-frontier')
+    if args.closed_form:
+        step4_args.append('--closed-form')
     if not run_script(SCRIPTS['zbp'], step4_args, 4, 6):
         return False
     

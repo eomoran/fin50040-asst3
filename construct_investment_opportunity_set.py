@@ -225,7 +225,7 @@ def optimize_single_portfolio(args_tuple):
     return None
 
 
-def construct_investment_opportunity_set(mu, Sigma, num_portfolios=200, allow_short_selling=True, n_jobs=None):
+def construct_investment_opportunity_set(mu, Sigma, num_portfolios=200, allow_short_selling=True, n_jobs=None, closed_form=False):
     """
     Construct the Investment Opportunity Set (mean-variance frontier)
     
@@ -258,6 +258,86 @@ def construct_investment_opportunity_set(mu, Sigma, num_portfolios=200, allow_sh
     w_mvp = inv_Sigma @ ones / (ones.T @ inv_Sigma @ ones)
     mu_mvp = mu.T @ w_mvp
     
+    if closed_form:
+        # Closed-form solution using hyperbola formula from professor's notes
+        # σ_p = sqrt( (C(μ_p)^2 - 2Bμ_p + A) / (AC - B^2) )
+        # where:
+        # A = μ^T Σ^-1 μ
+        # B = μ^T Σ^-1 1_N
+        # C = 1_N^T Σ^-1 1_N
+        
+        print(f"  Using closed-form hyperbola formula for IOS...")
+        
+        # Compute constants A, B, C
+        A = mu.T @ inv_Sigma @ mu
+        B = mu.T @ inv_Sigma @ ones
+        C = ones.T @ inv_Sigma @ ones
+        D = A * C - B * B  # AC - B^2
+        
+        print(f"  Constants: A = {A:.6f}, B = {B:.6f}, C = {C:.6f}, AC-B^2 = {D:.6f}")
+        
+        if D <= 0:
+            raise ValueError(f"AC - B^2 = {D:.6f} <= 0, cannot construct frontier")
+        
+        # Find range of returns
+        mu_min = mu.min()  # Minimum individual asset return
+        mu_max = mu.max()  # Maximum individual asset return
+        
+        # Extend range for inefficient limb (below MVP)
+        # Need to extend far enough to capture MSMP which is typically well below MVP
+        range_below_mvp = max(
+            abs(mu_mvp - mu_min),
+            mu_mvp * 0.20  # Extend at least 20% below MVP to capture MSMP
+        )
+        search_min = mu_mvp - range_below_mvp * 2.0  # Extend 2x the range below MVP
+        search_min = max(search_min, mu_mvp * 0.70)  # At least 30% below MVP
+        
+        # Generate target returns
+        num_inefficient = int(num_portfolios * 0.5)
+        num_efficient = num_portfolios - num_inefficient
+        
+        target_returns_inefficient = np.linspace(search_min, mu_mvp, num_inefficient + 1)[:-1]
+        target_returns_efficient = np.linspace(mu_mvp, mu_max, num_efficient)
+        target_returns = np.concatenate([target_returns_inefficient, target_returns_efficient])
+        
+        frontier_returns = []
+        frontier_vols = []
+        frontier_weights = []
+        
+        print(f"  Computing {len(target_returns)} frontier points using closed-form formula...")
+        
+        for mu_p in target_returns:
+            # Compute volatility using hyperbola formula
+            numerator = C * mu_p * mu_p - 2 * B * mu_p + A
+            if numerator < 0:
+                # Skip if negative (outside feasible region)
+                continue
+            
+            sigma_p = np.sqrt(numerator / D)
+            
+            # Compute portfolio weights using formula from professor's notes:
+            # w = (Σ^-1 (λμ + δ1_N)) / (1_N^T Σ^-1 (λμ + δ1_N))
+            # where:
+            # λ = (Cμ_p - B) / (AC - B^2)
+            # δ = (A - Bμ_p) / (AC - B^2)
+            lambda_val = (C * mu_p - B) / D
+            delta_val = (A - B * mu_p) / D
+            
+            w = inv_Sigma @ (lambda_val * mu + delta_val * ones)
+            w = w / (ones.T @ inv_Sigma @ (lambda_val * mu + delta_val * ones))
+            
+            frontier_returns.append(mu_p)
+            frontier_vols.append(sigma_p)
+            frontier_weights.append(w)
+        
+        print(f"  Successfully computed {len(frontier_returns)} frontier points using closed-form formula")
+        
+        return {
+            'returns': np.array(frontier_returns),
+            'volatilities': np.array(frontier_vols),
+            'weights': np.array(frontier_weights)
+        }
+    
     # Find range of returns
     mu_min = mu.min()  # Minimum individual asset return
     mu_max = mu.max()  # Maximum individual asset return
@@ -268,15 +348,15 @@ def construct_investment_opportunity_set(mu, Sigma, num_portfolios=200, allow_sh
     # Note: mu_mvp might be above or below mu_min depending on the data
     # We want to search BELOW MVP, so extend below mu_mvp
     # Use a percentage-based approach to ensure we extend far enough
-    # Extend at least 5% below MVP, or use the distance to min asset if that's larger
+    # Extend at least 20% below MVP to capture MSMP which is typically on inefficient limb
     range_below_mvp = max(
         abs(mu_mvp - mu_min),  # Distance between MVP and min asset return
-        mu_mvp * 0.05  # At least 5% below MVP
+        mu_mvp * 0.20  # At least 20% below MVP
     )
-    search_min = mu_mvp - range_below_mvp * 1.5  # Extend 1.5x the range below MVP
+    search_min = mu_mvp - range_below_mvp * 2.0  # Extend 2x the range below MVP
     
     # Ensure search_min is reasonable (not negative or too small)
-    search_min = max(search_min, mu_mvp * 0.90)  # At least 10% below MVP
+    search_min = max(search_min, mu_mvp * 0.70)  # At least 30% below MVP
     
     # Generate target returns covering both limbs
     # Inefficient limb: from search_min to MVP (below MVP)
@@ -498,6 +578,10 @@ def main():
         '--n-jobs', type=int, default=None,
         help='Number of parallel workers (default: CPU count - 1)'
     )
+    parser.add_argument(
+        '--closed-form', action='store_true',
+        help='Use closed-form analytical solution instead of optimization'
+    )
     
     args = parser.parse_args()
     
@@ -507,6 +591,7 @@ def main():
     print(f"Portfolio type: {args.portfolio_type}")
     print(f"Period: {args.start_year}-{args.end_year}")
     print(f"Number of frontier points: {args.num_portfolios}")
+    print(f"Method: {'CLOSED-FORM' if args.closed_form else 'OPTIMIZATION'}")
     print()
     
     # Load data
@@ -527,7 +612,8 @@ def main():
     else:
         print("  Short selling: NOT ALLOWED (long-only)")
     frontier = construct_investment_opportunity_set(mu, Sigma, num_portfolios=args.num_portfolios, 
-                                                     allow_short_selling=allow_short, n_jobs=args.n_jobs)
+                                                     allow_short_selling=allow_short, n_jobs=args.n_jobs,
+                                                     closed_form=args.closed_form)
     
     # Save results
     print("\nSaving results...")

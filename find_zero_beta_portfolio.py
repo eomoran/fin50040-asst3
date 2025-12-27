@@ -212,11 +212,13 @@ def find_zero_beta_portfolio(mu, Sigma, w_m, allow_short_selling=True, on_fronti
         
         if is_optimal_efficient:
             # Optimal is on efficient limb, so ZBP should be on inefficient limb (below MVP)
-            search_min = mu_min  # Start from minimum asset return
+            # Search from well below MVP down to minimum asset return (or even lower)
             search_max = mu_mvp * 0.999  # Just below MVP
+            search_min = min(mu_min, mu_mvp * 0.80)  # At least 20% below MVP, or minimum asset return if lower
             limb_name = "inefficient"
         else:
             # Optimal is on inefficient limb, so ZBP should be on efficient limb (above MVP)
+            # Search from just above MVP up to maximum asset return
             search_min = mu_mvp * 1.001  # Just above MVP
             search_max = mu_max  # Up to maximum asset return
             limb_name = "efficient"
@@ -405,6 +407,10 @@ def main():
         help='Constrain ZBP to be on the efficient frontier (default: False, just on IOS)'
     )
     parser.add_argument(
+        '--closed-form', action='store_true',
+        help='Use closed-form analytical solution (forces on_frontier=False, uses closed-form formula)'
+    )
+    parser.add_argument(
         '--print-only', action='store_true',
         help='Only print the result, do not save to files'
     )
@@ -425,9 +431,15 @@ def main():
     allow_short = not args.no_short_selling
     # Default: on_frontier = False (IOS only, not on frontier)
     # Use --on-frontier flag to constrain to frontier
-    on_frontier = args.on_frontier
-    print(f"Short selling: {'ALLOWED (free portfolio)' if allow_short else 'NOT ALLOWED (long-only)'}")
-    print(f"On frontier: {'YES' if on_frontier else 'NO (on IOS only)'}")
+    # If --closed-form is set, force on_frontier=False and use closed-form formula
+    if args.closed_form:
+        on_frontier = False
+        print(f"Short selling: {'ALLOWED (free portfolio)' if allow_short else 'NOT ALLOWED (long-only)'}")
+        print(f"Closed-form: YES (using analytical formula, on_frontier=False)")
+    else:
+        on_frontier = args.on_frontier
+        print(f"Short selling: {'ALLOWED (free portfolio)' if allow_short else 'NOT ALLOWED (long-only)'}")
+        print(f"On frontier: {'YES' if on_frontier else 'NO (on IOS only)'}")
     print()
     
     # Load data

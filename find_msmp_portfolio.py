@@ -118,7 +118,7 @@ def compute_moments(returns):
     return mu, Sigma, M, portfolio_names
 
 
-def find_msmp(mu, M, allow_short_selling=True):
+def find_msmp(mu, M, allow_short_selling=True, closed_form=False):
     """
     Find Minimum Second Moment Portfolio (MSMP)
     
@@ -133,6 +133,9 @@ def find_msmp(mu, M, allow_short_selling=True):
         Second moment matrix E[RR'] = (1/T) * sum(R_t * R_t')
     allow_short_selling : bool
         If True, allows negative weights (free portfolio)
+    closed_form : bool
+        If True, use closed-form solution: w = M^-1 * 1 / (1' * M^-1 * 1)
+        If False, use optimization
     
     Returns:
     --------
@@ -145,37 +148,59 @@ def find_msmp(mu, M, allow_short_selling=True):
     """
     n = len(mu)
     
-    # Minimize w'Mw = E[(w'R)²] subject to budget constraint
-    def objective(w):
-        return w.T @ M @ w
+    if closed_form:
+        # Closed-form solution: w = M^-1 * 1 / (1' * M^-1 * 1)
+        # This minimizes w'Mw subject to sum(w) = 1
+        ones = np.ones(n)
+        try:
+            inv_M = np.linalg.inv(M)
+        except np.linalg.LinAlgError:
+            inv_M = np.linalg.pinv(M)
+        
+        w_msmp = inv_M @ ones / (ones.T @ inv_M @ ones)
+        
+        # If short selling not allowed, we'd need to check and adjust, but for now
+        # we'll use the closed-form solution as-is (it may have negative weights)
+        if not allow_short_selling:
+            # If closed-form gives negative weights but short selling not allowed,
+            # we need to fall back to optimization with bounds
+            if np.any(w_msmp < 0):
+                print("  Warning: Closed-form solution has negative weights but short selling not allowed.")
+                print("  Falling back to optimization with bounds...")
+                closed_form = False
     
-    constraints = {'type': 'eq', 'fun': lambda w: np.sum(w) - 1}
-    
-    # Set bounds based on short selling constraint
-    if allow_short_selling:
-        # "Free portfolio" means short selling is allowed
-        # Bounds: weights can be between -1 and 2 (allows shorting one asset to go long in another)
-        bounds = [(-1, 2) for _ in range(n)]
-    else:
-        # No short selling: weights must be >= 0
-        bounds = [(0, 1) for _ in range(n)]
-    
-    w0 = np.ones(n) / n
-    
-    result = minimize(objective, w0, method='SLSQP',
-                     bounds=bounds, constraints=constraints,
-                     options={'maxiter': 2000, 'ftol': 1e-9})
-    
-    if not result.success:
-        # Try trust-constr as fallback
-        result = minimize(objective, w0, method='trust-constr',
+    if not closed_form:
+        # Minimize w'Mw = E[(w'R)²] subject to budget constraint
+        def objective(w):
+            return w.T @ M @ w
+        
+        constraints = {'type': 'eq', 'fun': lambda w: np.sum(w) - 1}
+        
+        # Set bounds based on short selling constraint
+        if allow_short_selling:
+            # "Free portfolio" means short selling is allowed
+            # Bounds: weights can be between -1 and 2 (allows shorting one asset to go long in another)
+            bounds = [(-1, 2) for _ in range(n)]
+        else:
+            # No short selling: weights must be >= 0
+            bounds = [(0, 1) for _ in range(n)]
+        
+        w0 = np.ones(n) / n
+        
+        result = minimize(objective, w0, method='SLSQP',
                          bounds=bounds, constraints=constraints,
-                         options={'maxiter': 2000, 'gtol': 1e-8})
-    
-    if not result.success:
-        raise ValueError(f"Failed to find MSMP: {result.message}")
-    
-    w_msmp = result.x
+                         options={'maxiter': 2000, 'ftol': 1e-9})
+        
+        if not result.success:
+            # Try trust-constr as fallback
+            result = minimize(objective, w0, method='trust-constr',
+                             bounds=bounds, constraints=constraints,
+                             options={'maxiter': 2000, 'gtol': 1e-8})
+        
+        if not result.success:
+            raise ValueError(f"Failed to find MSMP: {result.message}")
+        
+        w_msmp = result.x
     
     # Compute return and volatility
     # For volatility, we need Sigma (covariance matrix)
@@ -215,6 +240,10 @@ def main():
         '--no-short-selling', action='store_true',
         help='Restrict portfolio weights to be non-negative (no short selling)'
     )
+    parser.add_argument(
+        '--closed-form', action='store_true',
+        help='Use closed-form analytical solution instead of optimization'
+    )
     
     args = parser.parse_args()
     
@@ -226,6 +255,7 @@ def main():
     
     allow_short = not args.no_short_selling
     print(f"Short selling: {'ALLOWED (free portfolio)' if allow_short else 'NOT ALLOWED (long-only)'}")
+    print(f"Method: {'CLOSED-FORM' if args.closed_form else 'OPTIMIZATION'}")
     print()
     
     # Load data
@@ -241,7 +271,9 @@ def main():
     
     # Find MSMP (using M = E[RR'] directly, as professor does)
     print("\nFinding MSMP portfolio...")
-    w_msmp, msmp_return, msmp_vol = find_msmp(mu, M, allow_short_selling=allow_short)
+    if args.closed_form:
+        print("  Using closed-form solution: w = M^-1 * 1 / (1' * M^-1 * 1)")
+    w_msmp, msmp_return, msmp_vol = find_msmp(mu, M, allow_short_selling=allow_short, closed_form=args.closed_form)
     
     # Convert gross returns to net returns for display
     msmp_return_net = msmp_return - 1

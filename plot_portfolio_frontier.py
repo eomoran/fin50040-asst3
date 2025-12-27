@@ -588,7 +588,7 @@ def plot_tangency_line(ax, portfolio_return, msmp_return, portfolio_vol, max_vol
 
 def plot_portfolio_frontier(ios_df, ios_summary, msmp_summary=None, optimal_crra_summary=None,
                       zbp_summary=None, portfolio_type=None, start_year=None, end_year=None,
-                      figsize=(12, 8)):
+                      closed_form=False, figsize=(12, 8)):
     """
     Plot Investment Opportunity Set curve with key portfolios and tangent lines
     
@@ -800,6 +800,7 @@ def plot_portfolio_frontier(ios_df, ios_summary, msmp_summary=None, optimal_crra
     ax.set_ylabel('Expected Return (R)', fontsize=12, fontweight='bold')
     
     # Title
+    method_label = ' (Closed-Form)' if closed_form else ''
     if portfolio_type and start_year and end_year:
         title_parts = ['Investment Opportunity Set']
         if msmp_summary is not None:
@@ -808,7 +809,7 @@ def plot_portfolio_frontier(ios_df, ios_summary, msmp_summary=None, optimal_crra
             title_parts.append('Optimal CRRA')
         if zbp_summary is not None:
             title_parts.append('ZBP')
-        title = f"{', '.join(title_parts)}\n{portfolio_type.upper()} Portfolios ({start_year}-{end_year})"
+        title = f"{', '.join(title_parts)}{method_label}\n{portfolio_type.upper()} Portfolios ({start_year}-{end_year})"
     else:
         title = 'Investment Opportunity Set'
         if msmp_summary is not None:
@@ -817,6 +818,7 @@ def plot_portfolio_frontier(ios_df, ios_summary, msmp_summary=None, optimal_crra
             title += ' and Optimal CRRA'
         if zbp_summary is not None:
             title += ' and ZBP'
+        title += method_label
     ax.set_title(title, fontsize=14, fontweight='bold')
     
     # Grid
@@ -875,6 +877,10 @@ def main():
     parser.add_argument(
         '--output-suffix', type=str, default='',
         help='Suffix to add to output filename (e.g., "_test")'
+    )
+    parser.add_argument(
+        '--closed-form', action='store_true',
+        help='Indicate that closed-form solutions were used (for filename/title)'
     )
     
     args = parser.parse_args()
@@ -939,12 +945,18 @@ def main():
     # Plot
     print("\nGenerating plot...")
     fig, ax = plot_portfolio_frontier(
-        ios_df, ios_summary, msmp_summary, optimal_crra_summary, zbp_summary,
-        args.portfolio_type, args.start_year, args.end_year
+        ios_df, ios_summary, msmp_summary=msmp_summary, 
+        optimal_crra_summary=optimal_crra_summary, zbp_summary=zbp_summary,
+        portfolio_type=args.portfolio_type, start_year=args.start_year, end_year=args.end_year,
+        closed_form=args.closed_form
     )
     
     # Save plot
-    suffix = f"_{args.portfolio_type}_{args.start_year}_{args.end_year}{args.output_suffix}"
+    suffix = f"_{args.portfolio_type}_{args.start_year}_{args.end_year}"
+    if args.closed_form:
+        suffix += "_closed_form"
+    if args.output_suffix:
+        suffix += args.output_suffix
     filename = PLOTS_DIR / f'portfolio_frontier{suffix}.png'
     plt.savefig(filename, dpi=300, bbox_inches='tight')
     print(f"  Saved plot to {filename}")
