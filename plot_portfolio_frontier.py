@@ -892,6 +892,7 @@ def main():
     print(f"Period: {args.start_year}-{args.end_year}")
     allow_short = not args.no_short_selling
     print(f"Short selling: {'ALLOWED (free portfolio)' if allow_short else 'NOT ALLOWED (long-only)'}")
+    print(f"Method: {'CLOSED-FORM' if args.closed_form else 'OPTIMIZATION'}")
     print()
     
     # Load IOS data

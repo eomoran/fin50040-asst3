@@ -252,6 +252,8 @@ def run_all_steps(args):
     # Step 6: Plot IOS and Key Portfolios (depends on steps 1, 2, 3, 4)
     if not args.skip_plot:
         step6_args = common_args.copy() + ['--rra', str(args.rra)]
+        if args.closed_form:
+            step6_args.append('--closed-form')
         if not run_script(SCRIPTS['plot'], step6_args, 6, 6):
             return False
     else:
