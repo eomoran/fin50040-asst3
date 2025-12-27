@@ -71,6 +71,7 @@ def load_ios_data(portfolio_type, start_year, end_year, allow_short_selling=True
     if not ios_file.exists():
         raise FileNotFoundError(f"IOS curve file not found: {ios_file}")
     
+    print(f"  Loading IOS curve from: {ios_file}")
     ios_df = pd.read_csv(ios_file)
     
     return ios_df, ios_summary
@@ -98,8 +99,10 @@ def load_msmp_data(portfolio_type, start_year, end_year, allow_short_selling=Tru
     """
     summary_file = RESULTS_DIR / "msmp_summary.csv"
     if not summary_file.exists():
+        print(f"  MSMP summary file not found: {summary_file}")
         return None
     
+    print(f"  Loading MSMP summary from: {summary_file}")
     summary_df = pd.read_csv(summary_file)
     
     # Find matching entry
@@ -111,6 +114,7 @@ def load_msmp_data(portfolio_type, start_year, end_year, allow_short_selling=Tru
     )
     
     if not mask.any():
+        print(f"  No matching MSMP entry found in summary")
         return None
     
     return summary_df[mask].iloc[0]
@@ -265,6 +269,7 @@ def main():
     
     # Load IOS data
     print("Loading IOS data...")
+    print(f"  IOS summary file: {RESULTS_DIR / 'ios_summary.csv'}")
     try:
         ios_df, ios_summary = load_ios_data(
             args.portfolio_type, args.start_year, args.end_year, allow_short
@@ -276,6 +281,7 @@ def main():
     
     # Load MSMP data
     print("\nLoading MSMP data...")
+    print(f"  MSMP summary file: {RESULTS_DIR / 'msmp_summary.csv'}")
     msmp_summary = load_msmp_data(
         args.portfolio_type, args.start_year, args.end_year, allow_short
     )
