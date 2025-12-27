@@ -206,26 +206,45 @@ def construct_investment_opportunity_set(mu, Sigma, num_portfolios=200, allow_sh
         # Better initial guesses based on target return
         initial_guesses = []
         if target_return < mu_mvp:
-            # Inefficient part: try negative MVP (scaled and normalized)
+            # Inefficient part: we want portfolios with lower return but higher volatility
+            # Strategy: short high-return, low-volatility assets and go long low-return, high-volatility assets
+            
+            # Find assets with highest returns (to short) and lowest returns (to go long)
+            high_return_indices = np.argsort(mu)[-3:]  # Top 3 highest return assets
+            low_return_indices = np.argsort(mu)[:3]    # Bottom 3 lowest return assets
+            
+            # Try multiple strategies for inefficient limb
+            for short_frac in [0.3, 0.5, 0.7]:
+                w_ineff = np.zeros(n)
+                # Short high-return assets
+                for idx in high_return_indices:
+                    w_ineff[idx] = -short_frac / len(high_return_indices)
+                # Go long low-return assets (which tend to have higher volatility)
+                long_weight = 1 - np.sum(w_ineff)  # Remaining weight after shorting
+                for idx in low_return_indices:
+                    w_ineff[idx] += long_weight / len(low_return_indices)
+                
+                # Check bounds
+                if np.all(w_ineff >= -1) and np.all(w_ineff <= 2):
+                    initial_guesses.append(w_ineff)
+            
+            # Also try negative MVP (scaled and normalized)
             w_neg = -w_mvp.copy()
             if np.abs(np.sum(w_neg)) > 1e-10:
                 w_neg = w_neg / np.sum(w_neg)  # Normalize to sum to 1
                 # Check if within bounds (allows -1 to 2)
                 if np.all(w_neg >= -1) and np.all(w_neg <= 2):
                     initial_guesses.append(w_neg)
-            # Try scaled MVP (for inefficient part, we want lower return)
-            w_scaled = w_mvp * 0.3  # Scale down more aggressively
-            w_scaled = w_scaled / np.sum(w_scaled) if np.abs(np.sum(w_scaled)) > 1e-10 else np.ones(n) / n
-            initial_guesses.append(w_scaled)
-            # Try a portfolio that shorts high-return assets
-            # Find asset with highest return and short it
+            
+            # Try a portfolio that heavily shorts the highest return asset
             high_return_idx = np.argmax(mu)
             w_short = np.zeros(n)
-            w_short[high_return_idx] = -0.5  # Short high return asset
-            # Distribute remaining weight equally
-            remaining_weight = 1.5  # 1 - (-0.5) = 1.5
-            w_short += remaining_weight / n
-            initial_guesses.append(w_short)
+            w_short[high_return_idx] = -0.8  # Short high return asset heavily
+            # Go long in lowest return assets
+            low_return_idx = np.argmin(mu)
+            w_short[low_return_idx] = 1.8  # Use proceeds from short to go long
+            if np.all(w_short >= -1) and np.all(w_short <= 2):
+                initial_guesses.append(w_short)
         else:
             # Efficient part: start from MVP
             initial_guesses.append(w_mvp.copy())
