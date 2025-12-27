@@ -294,37 +294,65 @@ def find_zero_beta_portfolio(mu, Sigma, w_m, allow_short_selling=True, on_fronti
         return w_z, z_return, z_vol
     
     else:
-        # Fallback: Minimize variance subject to zero covariance only (not on frontier)
-        def objective(w):
-            return w.T @ Sigma @ w
+        # ZBP on IOS only - use closed-form formula
+        # Formula: z = (1 - (v'Σw)/(v'Σw - w'Σw)) v + ((v'Σw)/(v'Σw - w'Σw)) w
+        # where v = MVP, w = optimal portfolio (CRRA), z = ZBP
+        print(f"  Computing ZBP using closed-form formula...")
+        print(f"  MVP return: {mu_mvp:.6f}, Optimal return: {mu_opt:.6f}")
         
-        constraints = [
-            {'type': 'eq', 'fun': lambda w: np.sum(w) - 1},
-            {'type': 'eq', 'fun': lambda w: w.T @ Sigma @ w_m}
-        ]
+        # Compute terms needed for the formula
+        # v'Σw = covariance between MVP and optimal portfolio
+        v_Sigma_w = w_mvp.T @ Sigma @ w_m
         
-        if allow_short_selling:
-            bounds = [(-1, 2) for _ in range(n)]
-        else:
-            bounds = [(0, 1) for _ in range(n)]
+        # w'Σw = variance of optimal portfolio
+        w_Sigma_w = w_m.T @ Sigma @ w_m
         
-        w0 = np.ones(n) / n
+        # Denominator: v'Σw - w'Σw
+        denominator = v_Sigma_w - w_Sigma_w
         
-        result = minimize(objective, w0, method='SLSQP',
-                         bounds=bounds, constraints=constraints,
-                         options={'maxiter': 2000, 'ftol': 1e-9})
+        if abs(denominator) < 1e-10:
+            raise ValueError(f"Denominator too small ({denominator:.2e}). "
+                           "MVP and optimal portfolio may be too similar.")
         
-        if not result.success:
-            raise ValueError(f"Failed to find zero-β portfolio: {result.message}")
+        # Coefficient for MVP: 1 - (v'Σw)/(v'Σw - w'Σw)
+        alpha = 1 - (v_Sigma_w / denominator)
         
-        w_z = result.x
+        # Coefficient for optimal portfolio: (v'Σw)/(v'Σw - w'Σw)
+        beta = v_Sigma_w / denominator
+        
+        # ZBP weights: z = alpha * v + beta * w
+        w_z = alpha * w_mvp + beta * w_m
+        
+        # Verify budget constraint (should sum to 1)
+        budget_sum = np.sum(w_z)
+        if abs(budget_sum - 1) > 1e-10:
+            # Normalize if needed (shouldn't be necessary, but just in case)
+            print(f"  Warning: ZBP weights sum to {budget_sum:.10f}, normalizing...")
+            w_z = w_z / budget_sum
+        
+        # Compute ZBP return and volatility
         z_return = mu.T @ w_z
         z_vol = np.sqrt(w_z.T @ Sigma @ w_z)
         
-        # Verify constraints
+        # Verify zero-beta constraint (should be exactly 0)
         zero_beta_check = abs(w_z.T @ Sigma @ w_m)
-        if zero_beta_check > 1e-4:
-            print(f"  Warning: Zero-beta constraint not perfectly satisfied (error: {zero_beta_check:.2e})")
+        
+        # Verify budget constraint
+        budget_check = abs(np.sum(w_z) - 1)
+        
+        print(f"  Formula coefficients: alpha (MVP) = {alpha:.6f}, beta (Optimal) = {beta:.6f}")
+        print(f"  Zero-beta check (should be ~0): {zero_beta_check:.2e}")
+        print(f"  Budget constraint check (should be ~0): {budget_check:.2e}")
+        
+        if zero_beta_check > 1e-10:
+            print(f"  Warning: Zero-beta constraint error ({zero_beta_check:.2e}) is larger than expected.")
+            print(f"  This may indicate numerical precision issues.")
+        
+        # Check if on inefficient limb
+        if z_return < mu_mvp:
+            print(f"  ZBP is on inefficient limb (return {z_return:.6f} < MVP {mu_mvp:.6f})")
+        else:
+            print(f"  ZBP is on efficient limb (return {z_return:.6f} >= MVP {mu_mvp:.6f})")
         
         return w_z, z_return, z_vol
 
@@ -355,12 +383,16 @@ def main():
         help='Suffix to add to output filename (e.g., "_test")'
     )
     parser.add_argument(
-        '--no-short-selling', action='store_true',
-        help='Restrict portfolio weights to be non-negative (no short selling)'
+        '--on-frontier', action='store_true',
+        help='Constrain ZBP to be on the efficient frontier (default: False, just on IOS)'
     )
     parser.add_argument(
-        '--not-on-frontier', action='store_true',
-        help='Find ZBP without constraining it to be on the efficient frontier'
+        '--print-only', action='store_true',
+        help='Only print the result, do not save to files'
+    )
+    parser.add_argument(
+        '--no-short-selling', action='store_true',
+        help='Restrict portfolio weights to be non-negative (no short selling)'
     )
     
     args = parser.parse_args()
@@ -373,9 +405,11 @@ def main():
     print(f"Optimal portfolio RRA: {args.rra}")
     
     allow_short = not args.no_short_selling
-    on_frontier = not args.not_on_frontier
+    # Default: on_frontier = False (IOS only, not on frontier)
+    # Use --on-frontier flag to constrain to frontier
+    on_frontier = args.on_frontier
     print(f"Short selling: {'ALLOWED (free portfolio)' if allow_short else 'NOT ALLOWED (long-only)'}")
-    print(f"On frontier: {'YES' if on_frontier else 'NO'}")
+    print(f"On frontier: {'YES' if on_frontier else 'NO (on IOS only)'}")
     print()
     
     # Load data
@@ -416,6 +450,11 @@ def main():
     
     # Find Zero-Beta Portfolio
     print(f"\nFinding Zero-Beta Portfolio...")
+    if on_frontier:
+        print(f"  Constraint: On efficient frontier (minimum variance for return level)")
+    else:
+        print(f"  Constraint: On Investment Opportunity Set (IOS) only")
+    
     w_z, z_return, z_vol = find_zero_beta_portfolio(
         mu, Sigma, w_opt, allow_short_selling=allow_short, on_frontier=on_frontier
     )
@@ -430,6 +469,25 @@ def main():
     # Verify zero-beta constraint
     zero_beta_check = abs(w_z.T @ Sigma @ w_opt)
     print(f"  Zero-beta check (should be ~0): {zero_beta_check:.2e}")
+    
+    # Verify budget constraint
+    budget_check = abs(np.sum(w_z) - 1)
+    print(f"  Budget constraint check (should be ~0): {budget_check:.2e}")
+    
+    # Print result
+    print("\n" + "=" * 70)
+    print("ZBP Result (on IOS, not necessarily on frontier):")
+    print("=" * 70)
+    print(f"Return (gross): {z_return:.6f}")
+    print(f"Return (net): {z_return_net:.4%}")
+    print(f"Volatility: {z_vol:.4%}")
+    print(f"Zero-beta error: {zero_beta_check:.2e}")
+    print(f"Budget constraint error: {budget_check:.2e}")
+    print("=" * 70)
+    
+    if args.print_only:
+        print("\n(Print-only mode: results not saved)")
+        return
     
     # Save results
     print("\nSaving results...")
@@ -450,7 +508,6 @@ def main():
         'end_year': args.end_year,
         'rra': args.rra,
         'allow_short_selling': allow_short,
-        'on_frontier': on_frontier,
         'expected_return_gross': z_return,
         'expected_return_net': z_return_net,
         'volatility': z_vol,
@@ -463,19 +520,22 @@ def main():
     summary_file = RESULTS_DIR / "zbp_summary.csv"
     if summary_file.exists():
         existing_df = pd.read_csv(summary_file)
+        # Drop 'on_frontier' column if it exists (backward compatibility)
+        if 'on_frontier' in existing_df.columns:
+            existing_df = existing_df.drop(columns=['on_frontier'])
         # Check if this combination already exists
         mask = (
             (existing_df['portfolio_type'] == args.portfolio_type) &
             (existing_df['start_year'] == args.start_year) &
             (existing_df['end_year'] == args.end_year) &
             (existing_df['rra'] == args.rra) &
-            (existing_df['allow_short_selling'] == allow_short) &
-            (existing_df['on_frontier'] == on_frontier)
+            (existing_df['allow_short_selling'] == allow_short)
         )
         if mask.any():
-            # Update existing row
-            existing_df.loc[mask, summary_df.columns] = summary_df.values[0]
-            summary_df = existing_df
+            # Remove all matching rows (in case of duplicates from old on_frontier column)
+            existing_df = existing_df[~mask]
+            # Append new row
+            summary_df = pd.concat([existing_df, summary_df], ignore_index=True)
             print(f"  Updated existing entry in: zbp_summary.csv")
         else:
             # Append new row

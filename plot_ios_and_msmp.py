@@ -167,7 +167,7 @@ def load_optimal_crra_data(portfolio_type, start_year, end_year, rra=4.0, allow_
     return summary_df[mask].iloc[0]
 
 
-def load_zbp_data(portfolio_type, start_year, end_year, rra=4.0, allow_short_selling=True, on_frontier=True):
+def load_zbp_data(portfolio_type, start_year, end_year, rra=4.0, allow_short_selling=True):
     """
     Load Zero-Beta Portfolio data from summary CSV
     
@@ -183,8 +183,6 @@ def load_zbp_data(portfolio_type, start_year, end_year, rra=4.0, allow_short_sel
         Relative Risk Aversion coefficient for optimal portfolio (default: 4.0)
     allow_short_selling : bool
         Whether short selling was allowed
-    on_frontier : bool
-        Whether ZBP was constrained to be on frontier
     
     Returns:
     --------
@@ -199,14 +197,17 @@ def load_zbp_data(portfolio_type, start_year, end_year, rra=4.0, allow_short_sel
     print(f"  Loading ZBP summary from: {summary_file}")
     summary_df = pd.read_csv(summary_file)
     
+    # Drop 'on_frontier' column if it exists (backward compatibility)
+    if 'on_frontier' in summary_df.columns:
+        summary_df = summary_df.drop(columns=['on_frontier'])
+    
     # Find matching entry
     mask = (
         (summary_df['portfolio_type'] == portfolio_type) &
         (summary_df['start_year'] == start_year) &
         (summary_df['end_year'] == end_year) &
         (summary_df['rra'] == rra) &
-        (summary_df['allow_short_selling'] == allow_short_selling) &
-        (summary_df['on_frontier'] == on_frontier)
+        (summary_df['allow_short_selling'] == allow_short_selling)
     )
     
     if not mask.any():
@@ -451,7 +452,7 @@ def main():
     print("\nLoading ZBP data...")
     print(f"  ZBP summary file: {RESULTS_DIR / 'zbp_summary.csv'}")
     zbp_summary = load_zbp_data(
-        args.portfolio_type, args.start_year, args.end_year, args.rra, allow_short, on_frontier=True
+        args.portfolio_type, args.start_year, args.end_year, args.rra, allow_short
     )
     if zbp_summary is not None:
         print(f"  Found ZBP: R={zbp_summary['expected_return_gross']:.6f}, "
