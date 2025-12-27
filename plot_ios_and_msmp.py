@@ -236,6 +236,15 @@ def plot_ios_and_msmp(ios_df, ios_summary, msmp_summary=None, optimal_crra_summa
                   c='red', s=200, marker='*', edgecolors='black', linewidths=1.5,
                   label=f'MSMP (R={msmp_return:.4f}, σ={msmp_vol:.2%})', zorder=5)
     
+    # Plot optimal CRRA portfolio if available
+    if optimal_crra_summary is not None:
+        opt_return = optimal_crra_summary['expected_return_gross']
+        opt_vol = optimal_crra_summary['volatility']
+        rra = optimal_crra_summary['rra']
+        ax.scatter([opt_vol], [opt_return],
+                  c='green', s=200, marker='o', edgecolors='black', linewidths=1.5,
+                  label=f'Optimal CRRA (RRA={rra:.1f}, R={opt_return:.4f}, σ={opt_vol:.2%})', zorder=5)
+    
     # Labels and formatting
     ax.set_xlabel('Volatility (σ)', fontsize=12, fontweight='bold')
     ax.set_ylabel('Expected Return (R)', fontsize=12, fontweight='bold')
