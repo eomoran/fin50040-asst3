@@ -231,7 +231,8 @@ def main():
     # Convert gross returns to net returns for display
     msmp_return_net = msmp_return - 1
     
-    print(f"  MSMP return (gross): {msmp_return:.6f} (net: {msmp_return_net:.4%})")
+    print(f"  MSMP return (gross): {msmp_return:.6f}")
+    print(f"  MSMP return (net): {msmp_return_net:.4%}")
     print(f"  MSMP volatility: {msmp_vol:.4%}")
     
     # Save results
@@ -288,6 +289,7 @@ def main():
     print("\n" + "=" * 70)
     print("Summary")
     print("=" * 70)
+    print(f"MSMP return (gross): {msmp_return:.6f}")
     print(f"MSMP return (net): {msmp_return_net:.4%}")
     print(f"MSMP volatility: {msmp_vol:.4%}")
     print(f"Number of portfolios: {len(portfolio_names)}")

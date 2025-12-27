@@ -333,26 +333,26 @@ def plot_investment_opportunity_set(frontier, mu, Sigma, portfolio_names,
     figsize : tuple
         Figure size
     """
-    # Convert gross returns to net returns for display
-    frontier_returns_net = frontier['returns'] - 1
+    # Use gross returns throughout (R = 1 + r) for plotting
+    frontier_returns = frontier['returns']  # Gross returns
     frontier_vols = frontier['volatilities']
     
     # Find MVP (minimum volatility point)
     mvp_idx = np.argmin(frontier_vols)
-    mvp_return_net = frontier_returns_net[mvp_idx]
+    mvp_return = frontier_returns[mvp_idx]  # Gross return
     mvp_vol = frontier_vols[mvp_idx]
     
     # Separate efficient and inefficient limbs
     # Inefficient limb: return < MVP return AND volatility > MVP volatility
     # Efficient limb: return >= MVP return OR volatility <= MVP volatility (but not both <)
-    inefficient_mask = (frontier_returns_net < mvp_return_net) & (frontier_vols > mvp_vol)
+    inefficient_mask = (frontier_returns < mvp_return) & (frontier_vols > mvp_vol)
     efficient_mask = ~inefficient_mask
     
     # Sort each limb separately for proper plotting
     # Inefficient limb: sort by volatility DESCENDING (from highest vol down to MVP)
     # This ensures smooth connection to MVP
     inefficient_vols = frontier_vols[inefficient_mask]
-    inefficient_returns = frontier_returns_net[inefficient_mask]
+    inefficient_returns = frontier_returns[inefficient_mask]
     if len(inefficient_vols) > 0:
         inefficient_sort = np.argsort(inefficient_vols)[::-1]  # Descending order
         inefficient_vols_sorted = inefficient_vols[inefficient_sort]
@@ -363,7 +363,7 @@ def plot_investment_opportunity_set(frontier, mu, Sigma, portfolio_names,
     
     # Efficient limb: sort by volatility (ascending, from MVP up)
     efficient_vols = frontier_vols[efficient_mask]
-    efficient_returns = frontier_returns_net[efficient_mask]
+    efficient_returns = frontier_returns[efficient_mask]
     efficient_sort = np.argsort(efficient_vols)
     efficient_vols_sorted = efficient_vols[efficient_sort]
     efficient_returns_sorted = efficient_returns[efficient_sort]
@@ -371,33 +371,33 @@ def plot_investment_opportunity_set(frontier, mu, Sigma, portfolio_names,
     # Combine: inefficient limb (descending vol) -> MVP -> efficient limb (ascending vol)
     # This creates the full U-shape with smooth connections
     frontier_vols_sorted = np.concatenate([inefficient_vols_sorted, [mvp_vol], efficient_vols_sorted])
-    frontier_returns_net_sorted = np.concatenate([inefficient_returns_sorted, [mvp_return_net], efficient_returns_sorted])
+    frontier_returns_sorted = np.concatenate([inefficient_returns_sorted, [mvp_return], efficient_returns_sorted])
     
-    # Individual asset returns and volatilities
+    # Individual asset returns and volatilities (gross returns)
     if show_individual_assets:
-        asset_returns_net = mu - 1
+        asset_returns = mu  # Gross returns
         asset_vols = np.sqrt(np.diag(Sigma))
     
     # Create figure
     fig, ax = plt.subplots(figsize=figsize)
     
-    # Plot investment opportunity set (full U-shape)
-    ax.plot(frontier_vols_sorted, frontier_returns_net_sorted, 
+    # Plot investment opportunity set (full U-shape) - using gross returns
+    ax.plot(frontier_vols_sorted, frontier_returns_sorted, 
             'b-', linewidth=2, label='Investment Opportunity Set', alpha=0.7, zorder=2)
     
-    # Plot individual assets (if requested)
+    # Plot individual assets (if requested) - using gross returns
     if show_individual_assets:
-        ax.scatter(asset_vols, asset_returns_net, 
+        ax.scatter(asset_vols, asset_returns, 
                   c='gray', s=50, alpha=0.5, label='Individual Assets', zorder=1)
     
-    # Plot MVP
-    ax.scatter([mvp_vol], [mvp_return_net],
+    # Plot MVP - using gross returns
+    ax.scatter([mvp_vol], [mvp_return],
               c='purple', s=200, marker='^', edgecolors='black', linewidths=1.5,
-              label=f'MVP (R={mvp_return_net:.2%}, σ={mvp_vol:.2%})', zorder=5)
+              label=f'MVP (R={mvp_return:.4f}, σ={mvp_vol:.2%})', zorder=5)
     
     # Labels and formatting
     ax.set_xlabel('Volatility (σ)', fontsize=12, fontweight='bold')
-    ax.set_ylabel('Expected Return (r)', fontsize=12, fontweight='bold')
+    ax.set_ylabel('Expected Return (R)', fontsize=12, fontweight='bold')
     
     # Title
     title = f'Investment Opportunity Set\n{portfolio_type.upper()} Portfolios ({start_year}-{end_year})'
@@ -409,19 +409,20 @@ def plot_investment_opportunity_set(frontier, mu, Sigma, portfolio_names,
     # Legend
     ax.legend(loc='best', fontsize=10, framealpha=0.9)
     
-    # Format axes as percentages
+    # Format axes: x-axis as percentages, y-axis as decimals (gross returns)
     ax.xaxis.set_major_formatter(plt.FuncFormatter(lambda x, p: f'{x:.1%}'))
-    ax.yaxis.set_major_formatter(plt.FuncFormatter(lambda x, p: f'{x:.1%}'))
+    # Y-axis: gross returns (R), format as decimals (e.g., 1.10 for 10% return)
+    ax.yaxis.set_major_formatter(plt.FuncFormatter(lambda x, p: f'{x:.3f}'))
     
     # Adjust limits: x and y mins fixed at zero, maxes with padding
     min_vol = 0.0  # Fixed at zero
     max_vol = frontier_vols_sorted.max() * 1.1
     min_ret = 0.0  # Fixed at zero
-    max_ret = frontier_returns_net_sorted.max() * 1.1
+    max_ret = frontier_returns_sorted.max() * 1.1
     
     if show_individual_assets:
         max_vol = max(max_vol, asset_vols.max() * 1.1)
-        max_ret = max(max_ret, asset_returns_net.max() * 1.1)
+        max_ret = max(max_ret, asset_returns.max() * 1.1)
     
     ax.set_xlim(min_vol, max_vol)
     ax.set_ylim(min_ret, max_ret)
@@ -514,10 +515,10 @@ def main():
     print("\nSaving results...")
     suffix = f"_{args.portfolio_type}_{args.start_year}_{args.end_year}{args.output_suffix}"
     
-    # Save frontier data
+    # Save frontier data (gross returns)
     frontier_df = pd.DataFrame({
         'return_gross': frontier['returns'],
-        'return_net': frontier['returns'] - 1,
+        'return_net': frontier['returns'] - 1,  # Keep net for reference
         'volatility': frontier['volatilities']
     })
     frontier_df.to_csv(RESULTS_DIR / f"investment_opportunity_set{suffix}.csv", index=False)
@@ -544,15 +545,17 @@ def main():
     print("\n" + "=" * 70)
     print("Summary")
     print("=" * 70)
-    print(f"Frontier points: {len(frontier['returns'])}")
-    print(f"Return range (net): [{frontier_df['return_net'].min():.4%}, {frontier_df['return_net'].max():.4%}]")
-    print(f"Volatility range: [{frontier_df['volatility'].min():.4%}, {frontier_df['volatility'].max():.4%}]")
-    
-    # Find MVP
-    mvp_idx = np.argmin(frontier['volatilities'])
-    print(f"\nMinimum Variance Portfolio (MVP):")
-    print(f"  Return (net): {frontier_df.iloc[mvp_idx]['return_net']:.4%}")
-    print(f"  Volatility: {frontier_df.iloc[mvp_idx]['volatility']:.4%}")
+            print(f"Frontier points: {len(frontier['returns'])}")
+            print(f"Return range (gross): [{frontier_df['return_gross'].min():.6f}, {frontier_df['return_gross'].max():.6f}]")
+            print(f"Return range (net): [{frontier_df['return_net'].min():.4%}, {frontier_df['return_net'].max():.4%}]")
+            print(f"Volatility range: [{frontier_df['volatility'].min():.4%}, {frontier_df['volatility'].max():.4%}]")
+            
+            # Find MVP
+            mvp_idx = np.argmin(frontier['volatilities'])
+            print(f"\nMinimum Variance Portfolio (MVP):")
+            print(f"  Return (gross): {frontier_df.iloc[mvp_idx]['return_gross']:.6f}")
+            print(f"  Return (net): {frontier_df.iloc[mvp_idx]['return_net']:.4%}")
+            print(f"  Volatility: {frontier_df.iloc[mvp_idx]['volatility']:.4%}")
     
     print("\n✓ Investment Opportunity Set construction complete!")
     print("=" * 70)
