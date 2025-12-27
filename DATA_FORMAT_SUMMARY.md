@@ -42,10 +42,20 @@ All processed data is in `data/processed/` directory.
   - `RF`: Risk-free rate (**GROSS RETURN**, R = 1 + r)
 
 ### Important Notes
-- `RF` is in **gross returns** (R = 1 + r)
-- All other factors (`Mkt-RF`, `SMB`, `HML`, etc.) are **excess returns** (r, not R)
+- **`RF` is in GROSS returns** (R_f = 1 + r_f)
+  - Values are > 1 (e.g., 1.0312, 1.0356)
+  - This is correct: risk-free rate as gross return
+- **All other factors are EXCESS returns** (r, not R)
+  - `Mkt-RF` = r_m - r_f (can be negative, e.g., -0.1958)
+  - `SMB`, `HML`, `RMW`, `CMA` are also excess returns (can be negative)
+  - This is standard: factors are excess returns, not gross returns
 - For 1927-2013 period, use 3-factor model (covers full period)
 - For 1927-2024 period, can use either 3-factor or 5-factor model
+
+**Summary:**
+- Portfolio returns: **R** (gross returns, R = 1 + r)
+- Risk-free rate (RF): **R_f** (gross returns, R_f = 1 + r_f)
+- Factor returns (Mkt-RF, SMB, HML, etc.): **r** (excess returns, not gross)
 
 ## Data Loading Example
 
