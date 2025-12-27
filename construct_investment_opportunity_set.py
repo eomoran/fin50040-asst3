@@ -349,26 +349,27 @@ def plot_investment_opportunity_set(frontier, mu, Sigma, portfolio_names,
     efficient_mask = ~inefficient_mask
     
     # Sort each limb separately for proper plotting
-    # Inefficient limb: sort by volatility (ascending) to get the U-shape
+    # Inefficient limb: sort by volatility DESCENDING (from highest vol down to MVP)
+    # This ensures smooth connection to MVP
     inefficient_vols = frontier_vols[inefficient_mask]
     inefficient_returns = frontier_returns_net[inefficient_mask]
     if len(inefficient_vols) > 0:
-        inefficient_sort = np.argsort(inefficient_vols)
+        inefficient_sort = np.argsort(inefficient_vols)[::-1]  # Descending order
         inefficient_vols_sorted = inefficient_vols[inefficient_sort]
         inefficient_returns_sorted = inefficient_returns[inefficient_sort]
     else:
         inefficient_vols_sorted = np.array([])
         inefficient_returns_sorted = np.array([])
     
-    # Efficient limb: sort by volatility (ascending)
+    # Efficient limb: sort by volatility (ascending, from MVP up)
     efficient_vols = frontier_vols[efficient_mask]
     efficient_returns = frontier_returns_net[efficient_mask]
     efficient_sort = np.argsort(efficient_vols)
     efficient_vols_sorted = efficient_vols[efficient_sort]
     efficient_returns_sorted = efficient_returns[efficient_sort]
     
-    # Combine: inefficient limb first, then MVP, then efficient limb
-    # This creates the full U-shape
+    # Combine: inefficient limb (descending vol) -> MVP -> efficient limb (ascending vol)
+    # This creates the full U-shape with smooth connections
     frontier_vols_sorted = np.concatenate([inefficient_vols_sorted, [mvp_vol], efficient_vols_sorted])
     frontier_returns_net_sorted = np.concatenate([inefficient_returns_sorted, [mvp_return_net], efficient_returns_sorted])
     
@@ -412,16 +413,14 @@ def plot_investment_opportunity_set(frontier, mu, Sigma, portfolio_names,
     ax.xaxis.set_major_formatter(plt.FuncFormatter(lambda x, p: f'{x:.1%}'))
     ax.yaxis.set_major_formatter(plt.FuncFormatter(lambda x, p: f'{x:.1%}'))
     
-    # Adjust limits to ensure full U-shape is visible
-    min_vol = frontier_vols_sorted.min() * 0.9
+    # Adjust limits: x and y mins fixed at zero, maxes with padding
+    min_vol = 0.0  # Fixed at zero
     max_vol = frontier_vols_sorted.max() * 1.1
-    min_ret = frontier_returns_net_sorted.min() * 1.1
+    min_ret = 0.0  # Fixed at zero
     max_ret = frontier_returns_net_sorted.max() * 1.1
     
     if show_individual_assets:
-        min_vol = min(min_vol, asset_vols.min() * 0.9)
         max_vol = max(max_vol, asset_vols.max() * 1.1)
-        min_ret = min(min_ret, asset_returns_net.min() * 1.1)
         max_ret = max(max_ret, asset_returns_net.max() * 1.1)
     
     ax.set_xlim(min_vol, max_vol)
