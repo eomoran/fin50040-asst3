@@ -188,8 +188,10 @@ def construct_investment_opportunity_set(mu, Sigma, num_portfolios=200, allow_sh
         # Set bounds based on short selling constraint
         if allow_short_selling:
             # "Free portfolio" means short selling is allowed
-            # Bounds: weights can be between -1 and 1 (allows short selling)
-            bounds = [(-1, 1) for _ in range(n)]
+            # Bounds: weights can be between -1 and 2
+            # If we short one asset (w = -1), we can use that money to go long in another (w = 2)
+            # The budget constraint (sum(w) = 1) ensures weights are valid
+            bounds = [(-1, 2) for _ in range(n)]
         else:
             # No short selling: weights must be >= 0
             bounds = [(0, 1) for _ in range(n)]
@@ -197,16 +199,26 @@ def construct_investment_opportunity_set(mu, Sigma, num_portfolios=200, allow_sh
         # Better initial guesses based on target return
         initial_guesses = []
         if target_return < mu_mvp:
-            # Inefficient part: try negative MVP (scaled)
+            # Inefficient part: try negative MVP (scaled and normalized)
             w_neg = -w_mvp.copy()
             if np.abs(np.sum(w_neg)) > 1e-10:
-                w_neg = w_neg / np.sum(w_neg)
-                if np.all(w_neg >= -1) and np.all(w_neg <= 1):
+                w_neg = w_neg / np.sum(w_neg)  # Normalize to sum to 1
+                # Check if within bounds (allows -1 to 2)
+                if np.all(w_neg >= -1) and np.all(w_neg <= 2):
                     initial_guesses.append(w_neg)
-            # Also try scaled MVP
-            w_scaled = w_mvp * 0.5
+            # Try scaled MVP (for inefficient part, we want lower return)
+            w_scaled = w_mvp * 0.3  # Scale down more aggressively
             w_scaled = w_scaled / np.sum(w_scaled) if np.abs(np.sum(w_scaled)) > 1e-10 else np.ones(n) / n
             initial_guesses.append(w_scaled)
+            # Try a portfolio that shorts high-return assets
+            # Find asset with highest return and short it
+            high_return_idx = np.argmax(mu)
+            w_short = np.zeros(n)
+            w_short[high_return_idx] = -0.5  # Short high return asset
+            # Distribute remaining weight equally
+            remaining_weight = 1.5  # 1 - (-0.5) = 1.5
+            w_short += remaining_weight / n
+            initial_guesses.append(w_short)
         else:
             # Efficient part: start from MVP
             initial_guesses.append(w_mvp.copy())
