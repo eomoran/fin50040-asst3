@@ -511,6 +511,58 @@ def find_tangency_portfolio(rf, efficient_df):
     return tp_return, tp_vol
 
 
+def plot_asymptote_through_msmp(ax, msmp_vol, msmp_return, slope, max_vol, 
+                                 color='r', linestyle='-', linewidth=1.5, 
+                                 alpha=0.7, label=None, zorder=3):
+    """
+    Plot an asymptote that passes through MSMP and is tangent to the IOS.
+    
+    The asymptote passes through (msmp_vol, msmp_return) and has the given slope.
+    It extends from the y-axis (σ=0) to the frame edge.
+    
+    Parameters:
+    -----------
+    ax : matplotlib.axes.Axes
+        Axes to plot on
+    msmp_vol : float
+        MSMP volatility (x-coordinate)
+    msmp_return : float
+        MSMP return (gross, y-coordinate)
+    slope : float
+        Slope of the asymptote (tangent to IOS at MSMP)
+    max_vol : float
+        Maximum volatility to extend line to (frame edge)
+    color : str
+        Line color
+    linestyle : str
+        Line style
+    linewidth : float
+        Line width
+    alpha : float
+        Transparency
+    label : str
+        Label for legend
+    zorder : int
+        Z-order for plotting
+    """
+    # Asymptote: R = msmp_return + slope * (σ - msmp_vol)
+    # At σ=0: R = msmp_return - slope * msmp_vol
+    # At σ=max_vol: R = msmp_return + slope * (max_vol - msmp_vol)
+    y_intercept = msmp_return - slope * msmp_vol
+    
+    # Extend from y-axis (σ=0) to frame edge
+    x_line = np.array([0.0, max_vol])
+    y_line = np.array([y_intercept, y_intercept + slope * max_vol])
+    
+    # Verify it passes through MSMP
+    check = abs(msmp_return - (y_intercept + slope * msmp_vol))
+    if check > 1e-6:
+        print(f"  Warning: Asymptote check failed (error: {check:.2e})")
+    
+    ax.plot(x_line, y_line, color=color, linestyle=linestyle, 
+           linewidth=linewidth, alpha=alpha, label=label, zorder=zorder)
+
+
 def plot_tangency_line(ax, portfolio_return, msmp_return, portfolio_vol, max_vol,
                        ios_df, efficient_df, inefficient_df,
                        color='r', linestyle='-', linewidth=1.5, alpha=0.7, 
@@ -743,19 +795,28 @@ def plot_portfolio_frontier(ios_df, ios_summary, msmp_summary=None, optimal_crra
     # These represent the convex space from allocating between long/short positions
     # in the portfolio and the risk-free asset
     
-    # Horizontal line through ZBP
+    # Horizontal line through ZBP - extend to end of frame
     if zbp_summary is not None:
         zbp_return = zbp_summary['expected_return_gross']
         zbp_vol = zbp_summary['volatility']
-        # Draw horizontal line at ZBP return level
-        ax.axhline(y=zbp_return, color='black', linestyle='--', linewidth=1, alpha=0.5, zorder=1)
+        # Draw horizontal line at ZBP return level, extending to max_vol
+        ax.plot([0.0, max_vol], [zbp_return, zbp_return], 
+               color='black', linestyle='--', linewidth=1, alpha=0.5, zorder=1)
         # Line from CRRA portfolio to intersection of ZBP horizontal line with y-axis (vol=0)
+        # Then continue in the same direction to end of frame
         if optimal_crra_summary is not None:
             opt_return = optimal_crra_summary['expected_return_gross']
             opt_vol = optimal_crra_summary['volatility']
-            # Line from (opt_vol, opt_return) to (0, zbp_return)
-            x_line = np.array([0.0, opt_vol])
-            y_line = np.array([zbp_return, opt_return])
+            # Calculate slope from (0, zbp_return) to (opt_vol, opt_return)
+            if opt_vol > 1e-10:
+                slope = (opt_return - zbp_return) / opt_vol
+            else:
+                slope = 0
+            # Line from (0, zbp_return) to (opt_vol, opt_return), then continue to (max_vol, ...)
+            # At max_vol: y = zbp_return + slope * max_vol
+            y_at_max_vol = zbp_return + slope * max_vol
+            x_line = np.array([0.0, opt_vol, max_vol])
+            y_line = np.array([zbp_return, opt_return, y_at_max_vol])
             ax.plot(x_line, y_line, color='black', linestyle='--', linewidth=1.5,
                    alpha=0.7, label='CRRA ↔ ZBP horizontal', zorder=3)
     
@@ -770,23 +831,43 @@ def plot_portfolio_frontier(ios_df, ios_summary, msmp_summary=None, optimal_crra
                       c='blue', s=200, marker='D', edgecolors='black', linewidths=1.5,
                       label=f'Tangency Portfolio (TP) (R={tp_return:.4f}, σ={tp_vol:.2%})', zorder=5)
     
-    # Tangency lines using formula: 2 * R_portfolio - R_MSMP (red solid)
+    # Red lines: from (0, R_mvp) to TP and from (0, R_mvp) to MSMP
+    # These are not asymptotes but lines connecting MVP return on y-axis to key portfolios
     if msmp_summary is not None:
         msmp_return = msmp_summary['expected_return_gross']
         msmp_vol = msmp_summary['volatility']
         
-        # Tangency line at MSMP (using formula: 2 * R_MSMP - R_MSMP = R_MSMP)
-        plot_tangency_line(ax, msmp_return, msmp_return, msmp_vol, max_vol,
-                         ios_df, efficient_df, inefficient_df,
-                         color='r', linestyle='-', 
-                         label='Tangency line (MSMP)', zorder=3)
+        # Line from (0, R_mvp) to MSMP
+        # Slope = (msmp_return - mvp_return) / (msmp_vol - 0) = (msmp_return - mvp_return) / msmp_vol
+        if msmp_vol > 1e-10:
+            slope_msmp = (msmp_return - mvp_return) / msmp_vol
+        else:
+            slope_msmp = 0
         
-        # If we have tangency portfolio, also plot its tangency line
-        if tp_return is not None and tp_vol is not None:
-            plot_tangency_line(ax, tp_return, msmp_return, tp_vol, max_vol,
-                             ios_df, efficient_df, inefficient_df,
-                             color='r', linestyle='-', 
-                             label='Tangency line (TP)', zorder=3)
+        # Plot line from y-axis (σ=0) at R_mvp to frame edge
+        x_line = np.array([0.0, max_vol])
+        y_line = np.array([mvp_return, mvp_return + slope_msmp * max_vol])
+        ax.plot(x_line, y_line, color='r', linestyle='-', linewidth=1.5, alpha=0.7,
+               label='R_MVP → MSMP', zorder=3)
+    
+    # Line from (0, R_mvp) to Tangency Portfolio (TP)
+    if tp_return is not None and tp_vol is not None:
+        # Slope = (tp_return - mvp_return) / (tp_vol - 0) = (tp_return - mvp_return) / tp_vol
+        if tp_vol > 1e-10:
+            slope_tp = (tp_return - mvp_return) / tp_vol
+        else:
+            slope_tp = 0
+        
+        # Plot line from y-axis (σ=0) at R_mvp to frame edge
+        x_line = np.array([0.0, max_vol])
+        y_line = np.array([mvp_return, mvp_return + slope_tp * max_vol])
+        ax.plot(x_line, y_line, color='r', linestyle='-', linewidth=1.5, alpha=0.7,
+               label='R_MVP → TP', zorder=3)
+    
+    # Circle from origin to MSMP (centered at origin)
+    if msmp_summary is not None:
+        msmp_return = msmp_summary['expected_return_gross']
+        msmp_vol = msmp_summary['volatility']
         
         # Circle from origin to MSMP (centered at origin)
         # Radius = distance from origin to MSMP in (σ, R) space

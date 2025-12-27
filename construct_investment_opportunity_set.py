@@ -285,19 +285,27 @@ def construct_investment_opportunity_set(mu, Sigma, num_portfolios=200, allow_sh
         
         # Extend range for inefficient limb (below MVP)
         # Need to extend far enough to capture MSMP which is typically well below MVP
+        # MSMP can be significantly below MVP, so extend more aggressively
         range_below_mvp = max(
             abs(mu_mvp - mu_min),
-            mu_mvp * 0.20  # Extend at least 20% below MVP to capture MSMP
+            mu_mvp * 0.30  # Extend at least 30% below MVP to capture MSMP
         )
-        search_min = mu_mvp - range_below_mvp * 2.0  # Extend 2x the range below MVP
-        search_min = max(search_min, mu_mvp * 0.70)  # At least 30% below MVP
+        search_min = mu_mvp - range_below_mvp * 3.0  # Extend 3x the range below MVP
+        search_min = max(search_min, mu_mvp * 0.60)  # At least 40% below MVP to ensure MSMP is visible
         
         # Generate target returns
         num_inefficient = int(num_portfolios * 0.5)
         num_efficient = num_portfolios - num_inefficient
         
         target_returns_inefficient = np.linspace(search_min, mu_mvp, num_inefficient + 1)[:-1]
-        target_returns_efficient = np.linspace(mu_mvp, mu_max, num_efficient)
+        # Extend efficient limb beyond mu_max to show more of the upper limb
+        # Extend at least 20% above mu_max to match the extension of the lower limb
+        range_above_mvp = max(
+            abs(mu_max - mu_mvp),
+            mu_mvp * 0.20  # At least 20% above MVP
+        )
+        search_max = mu_max + range_above_mvp * 1.5  # Extend 1.5x the range above mu_max
+        target_returns_efficient = np.linspace(mu_mvp, search_max, num_efficient)
         target_returns = np.concatenate([target_returns_inefficient, target_returns_efficient])
         
         frontier_returns = []
@@ -348,15 +356,15 @@ def construct_investment_opportunity_set(mu, Sigma, num_portfolios=200, allow_sh
     # Note: mu_mvp might be above or below mu_min depending on the data
     # We want to search BELOW MVP, so extend below mu_mvp
     # Use a percentage-based approach to ensure we extend far enough
-    # Extend at least 20% below MVP to capture MSMP which is typically on inefficient limb
+    # Extend aggressively to capture MSMP which is typically well below MVP on inefficient limb
     range_below_mvp = max(
         abs(mu_mvp - mu_min),  # Distance between MVP and min asset return
-        mu_mvp * 0.20  # At least 20% below MVP
+        mu_mvp * 0.30  # At least 30% below MVP
     )
-    search_min = mu_mvp - range_below_mvp * 2.0  # Extend 2x the range below MVP
+    search_min = mu_mvp - range_below_mvp * 3.0  # Extend 3x the range below MVP
     
     # Ensure search_min is reasonable (not negative or too small)
-    search_min = max(search_min, mu_mvp * 0.70)  # At least 30% below MVP
+    search_min = max(search_min, mu_mvp * 0.60)  # At least 40% below MVP to ensure MSMP is visible
     
     # Generate target returns covering both limbs
     # Inefficient limb: from search_min to MVP (below MVP)
@@ -365,7 +373,14 @@ def construct_investment_opportunity_set(mu, Sigma, num_portfolios=200, allow_sh
     num_efficient = num_portfolios - num_inefficient  # 50% for efficient part
     
     target_returns_inefficient = np.linspace(search_min, mu_mvp, num_inefficient + 1)[:-1]  # Exclude MVP duplicate
-    target_returns_efficient = np.linspace(mu_mvp, mu_max, num_efficient)
+    # Extend efficient limb beyond mu_max to show more of the upper limb
+    # Extend at least 20% above mu_max to match the extension of the lower limb
+    range_above_mvp = max(
+        abs(mu_max - mu_mvp),
+        mu_mvp * 0.20  # At least 20% above MVP
+    )
+    search_max = mu_max + range_above_mvp * 1.5  # Extend 1.5x the range above mu_max
+    target_returns_efficient = np.linspace(mu_mvp, search_max, num_efficient)
     target_returns = np.concatenate([target_returns_inefficient, target_returns_efficient])
     
     frontier_returns = []
