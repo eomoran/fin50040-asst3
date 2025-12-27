@@ -154,13 +154,20 @@ def construct_investment_opportunity_set(mu, Sigma, num_portfolios=200, allow_sh
     mu_min = mu.min()  # Minimum individual asset return
     mu_max = mu.max()  # Maximum individual asset return
     
-    # Generate target returns covering both limbs
-    # Inefficient limb: from mu_min to MVP (below MVP)
-    # Efficient limb: from MVP to mu_max (above MVP)
-    num_inefficient = int(num_portfolios * 0.4)  # 40% for inefficient part
-    num_efficient = num_portfolios - num_inefficient  # 60% for efficient part
+    # For the inefficient limb, we need to extend below MVP
+    # The inefficient limb has higher volatility for the same or lower return
+    # We'll search from well below MVP return to capture the full U-shape
+    # Extend below MVP by a reasonable amount (e.g., 50% of the range from MVP to min)
+    range_below_mvp = mu_mvp - mu_min
+    search_min = mu_min - 0.5 * range_below_mvp  # Extend 50% below minimum asset return
     
-    target_returns_inefficient = np.linspace(mu_min, mu_mvp, num_inefficient + 1)[:-1]  # Exclude MVP duplicate
+    # Generate target returns covering both limbs
+    # Inefficient limb: from search_min to MVP (below MVP)
+    # Efficient limb: from MVP to mu_max (above MVP)
+    num_inefficient = int(num_portfolios * 0.5)  # 50% for inefficient part
+    num_efficient = num_portfolios - num_inefficient  # 50% for efficient part
+    
+    target_returns_inefficient = np.linspace(search_min, mu_mvp, num_inefficient + 1)[:-1]  # Exclude MVP duplicate
     target_returns_efficient = np.linspace(mu_mvp, mu_max, num_efficient)
     target_returns = np.concatenate([target_returns_inefficient, target_returns_efficient])
     
