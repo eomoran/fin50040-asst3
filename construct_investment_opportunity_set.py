@@ -545,17 +545,17 @@ def main():
     print("\n" + "=" * 70)
     print("Summary")
     print("=" * 70)
-            print(f"Frontier points: {len(frontier['returns'])}")
-            print(f"Return range (gross): [{frontier_df['return_gross'].min():.6f}, {frontier_df['return_gross'].max():.6f}]")
-            print(f"Return range (net): [{frontier_df['return_net'].min():.4%}, {frontier_df['return_net'].max():.4%}]")
-            print(f"Volatility range: [{frontier_df['volatility'].min():.4%}, {frontier_df['volatility'].max():.4%}]")
-            
-            # Find MVP
-            mvp_idx = np.argmin(frontier['volatilities'])
-            print(f"\nMinimum Variance Portfolio (MVP):")
-            print(f"  Return (gross): {frontier_df.iloc[mvp_idx]['return_gross']:.6f}")
-            print(f"  Return (net): {frontier_df.iloc[mvp_idx]['return_net']:.4%}")
-            print(f"  Volatility: {frontier_df.iloc[mvp_idx]['volatility']:.4%}")
+    print(f"Frontier points: {len(frontier['returns'])}")
+    print(f"Return range (gross): [{frontier_df['return_gross'].min():.6f}, {frontier_df['return_gross'].max():.6f}]")
+    print(f"Return range (net): [{frontier_df['return_net'].min():.4%}, {frontier_df['return_net'].max():.4%}]")
+    print(f"Volatility range: [{frontier_df['volatility'].min():.4%}, {frontier_df['volatility'].max():.4%}]")
+    
+    # Find MVP
+    mvp_idx = np.argmin(frontier['volatilities'])
+    print(f"\nMinimum Variance Portfolio (MVP):")
+    print(f"  Return (gross): {frontier_df.iloc[mvp_idx]['return_gross']:.6f}")
+    print(f"  Return (net): {frontier_df.iloc[mvp_idx]['return_net']:.4%}")
+    print(f"  Volatility: {frontier_df.iloc[mvp_idx]['volatility']:.4%}")
     
     print("\n✓ Investment Opportunity Set construction complete!")
     print("=" * 70)
