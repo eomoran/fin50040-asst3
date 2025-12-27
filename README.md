@@ -79,6 +79,24 @@ To change the second portfolio sort, edit `download_famafrench_data.py` and modi
    - `optimal_weights_combined.csv` - Optimal CRRA portfolio weights
    - `zero_beta_weights_combined.csv` - Zero-beta portfolio weights
 
+6. **Visualize efficient frontiers:**
+   ```bash
+   # Plot a specific configuration
+   python plot_efficient_frontier.py --portfolio-type size --start-year 1927 --end-year 2013
+   
+   # Plot all main configurations
+   python plot_efficient_frontier.py --all
+   ```
+   
+   This generates plots showing:
+   - The efficient frontier (mean-variance frontier)
+   - Individual asset portfolios
+   - MSMP portfolio (red star)
+   - Optimal CRRA portfolio (green diamond)
+   - Zero-beta portfolio (orange square)
+   
+   Plots are saved to `plots/` directory as both PNG (300 DPI) and PDF files.
+
 ## Results Comparison
 
 The results for the 1927-2013 subsample should be compared with the professor's original solution (see `Assignment 3 - Day 1 MPT CAPM.xlsx`). Any differences are likely due to:
