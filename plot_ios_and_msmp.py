@@ -45,6 +45,7 @@ def load_ios_data(portfolio_type, start_year, end_year, allow_short_selling=True
     if not summary_file.exists():
         raise FileNotFoundError(f"Summary file not found: {summary_file}")
     
+    print(f"  Loading IOS summary from: {summary_file}")
     summary_df = pd.read_csv(summary_file)
     
     # Find matching entry
