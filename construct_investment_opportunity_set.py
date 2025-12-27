@@ -380,8 +380,8 @@ def plot_investment_opportunity_set(frontier, mu, Sigma, portfolio_names,
     # Create figure
     fig, ax = plt.subplots(figsize=figsize)
     
-    # Plot investment opportunity set
-    ax.plot(frontier_vols_sorted, frontier_returns_net, 
+    # Plot investment opportunity set (full U-shape)
+    ax.plot(frontier_vols_sorted, frontier_returns_net_sorted, 
             'b-', linewidth=2, label='Investment Opportunity Set', alpha=0.7, zorder=2)
     
     # Plot individual assets (if requested)
@@ -415,8 +415,8 @@ def plot_investment_opportunity_set(frontier, mu, Sigma, portfolio_names,
     # Adjust limits to ensure full U-shape is visible
     min_vol = frontier_vols_sorted.min() * 0.9
     max_vol = frontier_vols_sorted.max() * 1.1
-    min_ret = frontier_returns_net.min() * 1.1
-    max_ret = frontier_returns_net.max() * 1.1
+    min_ret = frontier_returns_net_sorted.min() * 1.1
+    max_ret = frontier_returns_net_sorted.max() * 1.1
     
     if show_individual_assets:
         min_vol = min(min_vol, asset_vols.min() * 0.9)
