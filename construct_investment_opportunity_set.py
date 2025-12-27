@@ -308,7 +308,7 @@ def construct_investment_opportunity_set(mu, Sigma, num_portfolios=200, allow_sh
 
 def plot_investment_opportunity_set(frontier, mu, Sigma, portfolio_names, 
                                     portfolio_type, start_year, end_year,
-                                    show_individual_assets=True, figsize=(12, 8)):
+                                    figsize=(12, 8)):
     """
     Plot the Investment Opportunity Set (mean-variance frontier)
     
@@ -328,8 +328,6 @@ def plot_investment_opportunity_set(frontier, mu, Sigma, portfolio_names,
         Start year
     end_year : int
         End year
-    show_individual_assets : bool
-        Whether to show individual asset portfolios
     figsize : tuple
         Figure size
     """
@@ -373,22 +371,12 @@ def plot_investment_opportunity_set(frontier, mu, Sigma, portfolio_names,
     frontier_vols_sorted = np.concatenate([inefficient_vols_sorted, [mvp_vol], efficient_vols_sorted])
     frontier_returns_sorted = np.concatenate([inefficient_returns_sorted, [mvp_return], efficient_returns_sorted])
     
-    # Individual asset returns and volatilities (gross returns)
-    if show_individual_assets:
-        asset_returns = mu  # Gross returns
-        asset_vols = np.sqrt(np.diag(Sigma))
-    
     # Create figure
     fig, ax = plt.subplots(figsize=figsize)
     
     # Plot investment opportunity set (full U-shape) - using gross returns
     ax.plot(frontier_vols_sorted, frontier_returns_sorted, 
             'b-', linewidth=2, label='Investment Opportunity Set', alpha=0.7, zorder=2)
-    
-    # Plot individual assets (if requested) - using gross returns
-    if show_individual_assets:
-        ax.scatter(asset_vols, asset_returns, 
-                  c='gray', s=50, alpha=0.5, label='Individual Assets', zorder=1)
     
     # Plot MVP - using gross returns
     ax.scatter([mvp_vol], [mvp_return],
@@ -419,10 +407,6 @@ def plot_investment_opportunity_set(frontier, mu, Sigma, portfolio_names,
     max_vol = frontier_vols_sorted.max() * 1.1
     min_ret = 0.0  # Fixed at zero
     max_ret = frontier_returns_sorted.max() * 1.1
-    
-    if show_individual_assets:
-        max_vol = max(max_vol, asset_vols.max() * 1.1)
-        max_ret = max(max_ret, asset_returns.max() * 1.1)
     
     ax.set_xlim(min_vol, max_vol)
     ax.set_ylim(min_ret, max_ret)
@@ -471,10 +455,6 @@ def main():
     parser.add_argument(
         '--plot', action='store_true',
         help='Generate and save plot of the investment opportunity set'
-    )
-    parser.add_argument(
-        '--no-individual-assets', action='store_true',
-        help='Hide individual asset portfolios on the plot'
     )
     parser.add_argument(
         '--no-short-selling', action='store_true',
