@@ -512,13 +512,63 @@ def main():
     weights_df.to_csv(RESULTS_DIR / f"ios_weights{suffix}.csv", index=False)
     print(f"  Saved: ios_weights{suffix}.csv")
     
+    # Find MVP for summary
+    mvp_idx = np.argmin(frontier['volatilities'])
+    mvp_return_gross = frontier_df.iloc[mvp_idx]['return_gross']
+    mvp_return_net = frontier_df.iloc[mvp_idx]['return_net']
+    mvp_vol = frontier_df.iloc[mvp_idx]['volatility']
+    
+    # Save summary with flags, MVP stats, and ranges
+    summary_df = pd.DataFrame([{
+        'portfolio_type': args.portfolio_type,
+        'start_year': args.start_year,
+        'end_year': args.end_year,
+        'allow_short_selling': allow_short,
+        'mvp_return_gross': mvp_return_gross,
+        'mvp_return_net': mvp_return_net,
+        'mvp_volatility': mvp_vol,
+        'return_range_gross_min': frontier_df['return_gross'].min(),
+        'return_range_gross_max': frontier_df['return_gross'].max(),
+        'return_range_net_min': frontier_df['return_net'].min(),
+        'return_range_net_max': frontier_df['return_net'].max(),
+        'volatility_range_min': frontier_df['volatility'].min(),
+        'volatility_range_max': frontier_df['volatility'].max(),
+        'num_portfolios': len(portfolio_names),
+        'num_observations': len(returns),
+        'num_frontier_points': len(frontier['returns'])
+    }])
+    
+    # Check if summary file exists, append if it does
+    summary_file = RESULTS_DIR / "ios_summary.csv"
+    if summary_file.exists():
+        existing_df = pd.read_csv(summary_file)
+        # Check if this combination already exists
+        mask = (
+            (existing_df['portfolio_type'] == args.portfolio_type) &
+            (existing_df['start_year'] == args.start_year) &
+            (existing_df['end_year'] == args.end_year) &
+            (existing_df['allow_short_selling'] == allow_short)
+        )
+        if mask.any():
+            # Update existing row
+            existing_df.loc[mask, summary_df.columns] = summary_df.values[0]
+            summary_df = existing_df
+            print(f"  Updated existing entry in: ios_summary.csv")
+        else:
+            # Append new row
+            summary_df = pd.concat([existing_df, summary_df], ignore_index=True)
+            print(f"  Appended to: ios_summary.csv")
+    else:
+        print(f"  Created: ios_summary.csv")
+    
+    summary_df.to_csv(summary_file, index=False)
+    
     # Plot if requested
     if args.plot:
         print("\nGenerating plot...")
         plot_investment_opportunity_set(
             frontier, mu, Sigma, portfolio_names,
-            args.portfolio_type, args.start_year, args.end_year,
-            show_individual_assets=not args.no_individual_assets
+            args.portfolio_type, args.start_year, args.end_year
         )
     
     # Print summary
@@ -530,12 +580,10 @@ def main():
     print(f"Return range (net): [{frontier_df['return_net'].min():.4%}, {frontier_df['return_net'].max():.4%}]")
     print(f"Volatility range: [{frontier_df['volatility'].min():.4%}, {frontier_df['volatility'].max():.4%}]")
     
-    # Find MVP
-    mvp_idx = np.argmin(frontier['volatilities'])
     print(f"\nMinimum Variance Portfolio (MVP):")
-    print(f"  Return (gross): {frontier_df.iloc[mvp_idx]['return_gross']:.6f}")
-    print(f"  Return (net): {frontier_df.iloc[mvp_idx]['return_net']:.4%}")
-    print(f"  Volatility: {frontier_df.iloc[mvp_idx]['volatility']:.4%}")
+    print(f"  Return (gross): {mvp_return_gross:.6f}")
+    print(f"  Return (net): {mvp_return_net:.4%}")
+    print(f"  Volatility: {mvp_vol:.4%}")
     
     print("\n✓ Investment Opportunity Set construction complete!")
     print("=" * 70)
