@@ -101,27 +101,36 @@ def compute_moments(returns):
     
     returns_filtered = returns[valid_portfolios]
     
+    # Convert to numpy array
+    R = returns_filtered.values  # Shape: (T, n) where T = number of periods, n = number of portfolios
+    
     # Compute moments
     mu = returns_filtered.mean().values  # Mean gross returns
     Sigma = returns_filtered.cov().values  # Covariance matrix of gross returns
+    
+    # Compute second moment matrix E[RR'] directly from data (as professor does)
+    # M = (1/T) * sum_{t=1}^T R_t * R_t'
+    # This is more accurate than using M = Sigma + mu*mu' when computed from sample
+    M = (R.T @ R) / len(R)  # Shape: (n, n)
+    
     portfolio_names = valid_portfolios
     
-    return mu, Sigma, portfolio_names
+    return mu, Sigma, M, portfolio_names
 
 
-def find_msmp(mu, Sigma, allow_short_selling=True):
+def find_msmp(mu, M, allow_short_selling=True):
     """
     Find Minimum Second Moment Portfolio (MSMP)
     
-    MSMP minimizes E[(w'R)²] where R are gross returns.
-    E[(w'R)²] = w'Σ_R w + (w'μ_R)² = w'(Σ_R + μ_R μ_R')w
+    MSMP minimizes E[(w'R)²] = w'E[RR']w where R are gross returns.
+    Uses the second moment matrix M = E[RR'] computed directly from data.
     
     Parameters:
     -----------
     mu : np.array
         Mean gross returns (E[R])
-    Sigma : np.array
-        Covariance matrix of gross returns (Cov(R))
+    M : np.array
+        Second moment matrix E[RR'] = (1/T) * sum(R_t * R_t')
     allow_short_selling : bool
         If True, allows negative weights (free portfolio)
     
@@ -135,9 +144,6 @@ def find_msmp(mu, Sigma, allow_short_selling=True):
         MSMP volatility (std of w'R)
     """
     n = len(mu)
-    
-    # Second moment matrix: Σ_R + μ_R μ_R'
-    M = Sigma + np.outer(mu, mu)
     
     # Minimize w'Mw = E[(w'R)²] subject to budget constraint
     def objective(w):
@@ -170,6 +176,14 @@ def find_msmp(mu, Sigma, allow_short_selling=True):
         raise ValueError(f"Failed to find MSMP: {result.message}")
     
     w_msmp = result.x
+    
+    # Compute return and volatility
+    # For volatility, we need Sigma (covariance matrix)
+    # Compute it from M and mu: Sigma = M - mu*mu'
+    # This is consistent: M = E[RR'] = E[R]E[R'] + Cov(R) = mu*mu' + Sigma
+    # Therefore: Sigma = M - mu*mu'
+    Sigma = M - np.outer(mu, mu)
+    
     msmp_return = mu.T @ w_msmp  # E[w'R] (gross return)
     msmp_vol = np.sqrt(w_msmp.T @ Sigma @ w_msmp)  # std(w'R)
     
@@ -220,13 +234,14 @@ def main():
     
     # Compute moments
     print("\nComputing moments...")
-    mu, Sigma, portfolio_names = compute_moments(returns)
+    mu, Sigma, M, portfolio_names = compute_moments(returns)
     print(f"  Mean returns range: [{mu.min():.4f}, {mu.max():.4f}] (gross)")
     print(f"  Volatility range: [{np.sqrt(np.diag(Sigma)).min():.4f}, {np.sqrt(np.diag(Sigma)).max():.4f}]")
+    print(f"  Computing second moment matrix M = E[RR'] directly from data...")
     
-    # Find MSMP
+    # Find MSMP (using M = E[RR'] directly, as professor does)
     print("\nFinding MSMP portfolio...")
-    w_msmp, msmp_return, msmp_vol = find_msmp(mu, Sigma, allow_short_selling=allow_short)
+    w_msmp, msmp_return, msmp_vol = find_msmp(mu, M, allow_short_selling=allow_short)
     
     # Convert gross returns to net returns for display
     msmp_return_net = msmp_return - 1

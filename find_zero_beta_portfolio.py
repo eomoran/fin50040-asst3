@@ -198,11 +198,28 @@ def find_zero_beta_portfolio(mu, Sigma, w_m, allow_short_selling=True, on_fronti
     mu_mvp = mu.T @ w_mvp
     mu_opt = mu.T @ w_m
     
+    # Get range of returns for searching opposite limb
+    mu_min = mu.min()  # Minimum individual asset return
+    mu_max = mu.max()  # Maximum individual asset return
+    
     if on_frontier:
         # Search along the frontier for ZBP
-        # ZBP should be on inefficient limb (below MVP)
-        search_min = mu_mvp * 0.80  # 20% below MVP
-        search_max = mu_mvp * 1.05  # 5% above MVP (to include MVP region)
+        # ZBP should be on the OPPOSITE limb from the optimal portfolio
+        # If optimal portfolio is on efficient limb (above MVP), ZBP should be on inefficient limb (below MVP)
+        # If optimal portfolio is on inefficient limb (below MVP), ZBP should be on efficient limb (above MVP)
+        
+        is_optimal_efficient = mu_opt >= mu_mvp
+        
+        if is_optimal_efficient:
+            # Optimal is on efficient limb, so ZBP should be on inefficient limb (below MVP)
+            search_min = mu_min  # Start from minimum asset return
+            search_max = mu_mvp * 0.999  # Just below MVP
+            limb_name = "inefficient"
+        else:
+            # Optimal is on inefficient limb, so ZBP should be on efficient limb (above MVP)
+            search_min = mu_mvp * 1.001  # Just above MVP
+            search_max = mu_max  # Up to maximum asset return
+            limb_name = "efficient"
         
         # Generate target returns
         num_targets = 200
@@ -211,9 +228,10 @@ def find_zero_beta_portfolio(mu, Sigma, w_m, allow_short_selling=True, on_fronti
         best_result = None
         best_cov = np.inf
         
-        print(f"  Searching for ZBP on frontier...")
+        print(f"  Searching for ZBP on frontier ({limb_name} limb)...")
+        print(f"  Optimal portfolio is on {'efficient' if is_optimal_efficient else 'inefficient'} limb (return: {mu_opt:.6f})")
+        print(f"  MVP return: {mu_mvp:.6f}")
         print(f"  Search range: [{search_min:.6f}, {search_max:.6f}] (gross returns)")
-        print(f"  MVP return: {mu_mvp:.6f}, Optimal return: {mu_opt:.6f}")
         
         for i, z_return_target in enumerate(target_returns):
             # Minimize variance subject to:

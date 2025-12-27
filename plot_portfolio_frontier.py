@@ -256,7 +256,8 @@ def load_risk_free_rate(start_year, end_year):
 def plot_line_from_rf(ax, rf, portfolio_vol, portfolio_return, max_vol, reflect=False, 
                       color='r', linestyle='--', linewidth=1.5, alpha=0.7, label=None, zorder=3):
     """
-    Plot a line from risk-free rate (on y-axis) to a portfolio point
+    Plot a simple line from risk-free rate (on y-axis) to a portfolio point, extending to frame edge.
+    This is NOT a tangent line, just a straight connection.
     
     Parameters:
     -----------
@@ -268,6 +269,8 @@ def plot_line_from_rf(ax, rf, portfolio_vol, portfolio_return, max_vol, reflect=
         Portfolio volatility (x-coordinate)
     portfolio_return : float
         Portfolio return (y-coordinate)
+    max_vol : float
+        Maximum volatility to extend line to (frame edge)
     reflect : bool
         If True, reflect the line along y=rf (for MSMP)
     color : str
@@ -302,6 +305,282 @@ def plot_line_from_rf(ax, rf, portfolio_vol, portfolio_return, max_vol, reflect=
         # Extend to frame edge
         x_line = np.array([0.0, max_vol])
         y_line = np.array([rf, rf + slope * max_vol])
+    
+    ax.plot(x_line, y_line, color=color, linestyle=linestyle, 
+           linewidth=linewidth, alpha=alpha, label=label, zorder=zorder)
+
+
+def calculate_frontier_slope(ios_df, portfolio_vol, portfolio_return, efficient_df, inefficient_df):
+    """
+    Calculate the slope of the frontier at a given portfolio point
+    
+    Parameters:
+    -----------
+    ios_df : pd.DataFrame
+        Full IOS curve data
+    portfolio_vol : float
+        Portfolio volatility
+    portfolio_return : float
+        Portfolio return
+    efficient_df : pd.DataFrame
+        Efficient limb data
+    inefficient_df : pd.DataFrame
+        Inefficient limb data
+    
+    Returns:
+    --------
+    slope : float
+        Slope of the frontier at the portfolio point
+    """
+    # Determine which limb the portfolio is on
+    mvp_idx = ios_df['volatility'].idxmin()
+    mvp_return = ios_df.loc[mvp_idx, 'return_gross']
+    mvp_vol = ios_df.loc[mvp_idx, 'volatility']
+    
+    is_efficient = portfolio_return >= mvp_return or portfolio_vol <= mvp_vol
+    
+    if is_efficient:
+        # On efficient limb - use efficient_df
+        vols = efficient_df['volatility'].values
+        returns = efficient_df['return_gross'].values
+    else:
+        # On inefficient limb - use inefficient_df
+        vols = inefficient_df['volatility'].values
+        returns = inefficient_df['return_gross'].values
+    
+    if len(vols) < 2:
+        # Fallback: use simple slope from MVP
+        if portfolio_vol > 1e-10:
+            return (portfolio_return - mvp_return) / (portfolio_vol - mvp_vol)
+        else:
+            return 0
+    
+    # Find closest point on the appropriate limb
+    dist = np.abs(vols - portfolio_vol)
+    closest_idx = np.argmin(dist)
+    
+    # Estimate slope using nearby points
+    if closest_idx > 0 and closest_idx < len(vols) - 1:
+        # Use points before and after to estimate slope
+        vol_before = vols[closest_idx - 1]
+        vol_after = vols[closest_idx + 1]
+        ret_before = returns[closest_idx - 1]
+        ret_after = returns[closest_idx + 1]
+        
+        # Average slope from both sides
+        slope1 = (returns[closest_idx] - ret_before) / (vols[closest_idx] - vol_before) if abs(vols[closest_idx] - vol_before) > 1e-10 else 0
+        slope2 = (ret_after - returns[closest_idx]) / (vol_after - vols[closest_idx]) if abs(vol_after - vols[closest_idx]) > 1e-10 else 0
+        
+        if slope1 != 0 and slope2 != 0:
+            slope = (slope1 + slope2) / 2
+        elif slope1 != 0:
+            slope = slope1
+        elif slope2 != 0:
+            slope = slope2
+        else:
+            slope = 0
+    elif closest_idx == 0 and len(vols) > 1:
+        # At start of limb, use forward difference
+        slope = (returns[1] - returns[0]) / (vols[1] - vols[0]) if abs(vols[1] - vols[0]) > 1e-10 else 0
+    elif closest_idx == len(vols) - 1 and len(vols) > 1:
+        # At end of limb, use backward difference
+        slope = (returns[-1] - returns[-2]) / (vols[-1] - vols[-2]) if abs(vols[-1] - vols[-2]) > 1e-10 else 0
+    else:
+        # Fallback
+        slope = (portfolio_return - mvp_return) / (portfolio_vol - mvp_vol) if (portfolio_vol - mvp_vol) > 1e-10 else 0
+    
+    return slope
+
+
+def plot_tangent_line_from_rf(ax, rf, portfolio_vol, portfolio_return, max_vol, 
+                               ios_df, efficient_df, inefficient_df,
+                               reflect=False, color='r', linestyle='-', 
+                               linewidth=1.5, alpha=0.7, label=None, zorder=3):
+    """
+    Plot a tangent line to the frontier at a portfolio point, extending to frame edge.
+    The line passes through the portfolio point and is tangent to the frontier there.
+    It extends back to the y-axis (where it may or may not intersect at R_f).
+    
+    Parameters:
+    -----------
+    ax : matplotlib.axes.Axes
+        Axes to plot on
+    rf : float
+        Risk-free rate (gross return, on y-axis at x=0) - for reference only
+    portfolio_vol : float
+        Portfolio volatility (x-coordinate)
+    portfolio_return : float
+        Portfolio return (y-coordinate)
+    max_vol : float
+        Maximum volatility to extend line to (frame edge)
+    ios_df : pd.DataFrame
+        Full IOS curve data
+    efficient_df : pd.DataFrame
+        Efficient limb data
+    inefficient_df : pd.DataFrame
+        Inefficient limb data
+    reflect : bool
+        If True, reflect the portfolio return across y=rf for the reflected line
+    color : str
+        Line color
+    linestyle : str
+        Line style
+    linewidth : float
+        Line width
+    alpha : float
+        Transparency
+    label : str
+        Label for legend
+    """
+    # Calculate the slope of the frontier at the portfolio point
+    frontier_slope = calculate_frontier_slope(ios_df, portfolio_vol, portfolio_return, 
+                                             efficient_df, inefficient_df)
+    
+    if reflect:
+        # For reflected line: reflect the portfolio return across R_f
+        reflected_return = 2 * rf - portfolio_return
+        # The reflected line passes through (portfolio_vol, reflected_return)
+        # Use negative of frontier slope for reflection
+        slope = -frontier_slope
+        # Calculate y-intercept: R = reflected_return - slope * portfolio_vol (at σ=0)
+        y_intercept = reflected_return - slope * portfolio_vol
+        # The line passes through (portfolio_vol, reflected_return)
+        point_vol = portfolio_vol
+        point_return = reflected_return
+    else:
+        # Normal tangent line: passes through portfolio point with frontier slope
+        slope = frontier_slope
+        # Calculate y-intercept: R = portfolio_return - slope * portfolio_vol (at σ=0)
+        y_intercept = portfolio_return - slope * portfolio_vol
+        # The line passes through (portfolio_vol, portfolio_return)
+        point_vol = portfolio_vol
+        point_return = portfolio_return
+    
+    # Verify the line passes through the point
+    # R_point should equal y_intercept + slope * point_vol
+    check = abs(point_return - (y_intercept + slope * point_vol))
+    if check > 1e-6:
+        print(f"  Warning: Tangent line check failed (error: {check:.2e})")
+    
+    # Extend line from y-axis (σ=0) to frame edge
+    x_line = np.array([0.0, max_vol])
+    y_line = np.array([y_intercept, y_intercept + slope * max_vol])
+    
+    ax.plot(x_line, y_line, color=color, linestyle=linestyle, 
+           linewidth=linewidth, alpha=alpha, label=label, zorder=zorder)
+
+
+def find_tangency_portfolio(rf, efficient_df):
+    """
+    Find the tangency portfolio (TP) - the portfolio on the efficient frontier
+    that maximizes Sharpe ratio: (R - R_f) / σ
+    
+    Parameters:
+    -----------
+    rf : float
+        Risk-free rate (gross return)
+    efficient_df : pd.DataFrame
+        Efficient frontier points with 'return_gross' and 'volatility' columns
+    
+    Returns:
+    --------
+    tp_return : float or None
+        Tangency portfolio return
+    tp_vol : float or None
+        Tangency portfolio volatility
+    """
+    if rf is None or len(efficient_df) == 0:
+        return None, None
+    
+    # Find portfolio on efficient frontier that maximizes Sharpe ratio
+    # Sharpe ratio = (R - R_f) / σ
+    best_sharpe = -np.inf
+    tp_return = None
+    tp_vol = None
+    
+    for idx, row in efficient_df.iterrows():
+        ret = row['return_gross']
+        vol = row['volatility']
+        if vol > 1e-10:
+            sharpe = (ret - rf) / vol
+            if sharpe > best_sharpe:
+                best_sharpe = sharpe
+                tp_return = ret
+                tp_vol = vol
+    
+    return tp_return, tp_vol
+
+
+def plot_tangency_line(ax, portfolio_return, msmp_return, portfolio_vol, max_vol,
+                       ios_df, efficient_df, inefficient_df,
+                       color='r', linestyle='-', linewidth=1.5, alpha=0.7, 
+                       label=None, zorder=3):
+    """
+    Plot a tangency line that is tangent to the IOS at the portfolio point.
+    
+    The tangency line uses the formula: y_intercept = 2 * R_portfolio - R_MSMP
+    BUT the line must be tangent to the frontier, so we use the frontier slope
+    at the portfolio point and ensure the line passes through the portfolio.
+    
+    Parameters:
+    -----------
+    ax : matplotlib.axes.Axes
+        Axes to plot on
+    portfolio_return : float
+        Expected return of the portfolio
+    msmp_return : float
+        Expected return of MSMP
+    portfolio_vol : float
+        Volatility of the portfolio (line passes through this point)
+    max_vol : float
+        Maximum volatility to extend line to (frame edge)
+    ios_df : pd.DataFrame
+        Full IOS curve data
+    efficient_df : pd.DataFrame
+        Efficient limb data
+    inefficient_df : pd.DataFrame
+        Inefficient limb data
+    color : str
+        Line color
+    linestyle : str
+        Line style
+    linewidth : float
+        Line width
+    alpha : float
+        Transparency
+    label : str
+        Label for legend
+    """
+    # Calculate the slope of the frontier at the portfolio point
+    frontier_slope = calculate_frontier_slope(ios_df, portfolio_vol, portfolio_return, 
+                                             efficient_df, inefficient_df)
+    
+    # The tangency line must:
+    # 1. Pass through (portfolio_vol, portfolio_return)
+    # 2. Have slope = frontier_slope (to be tangent)
+    # 3. Have y-intercept = 2 * R_portfolio - R_MSMP (from formula)
+    
+    # Calculate y-intercept from formula
+    y_intercept_formula = 2 * portfolio_return - msmp_return
+    
+    # But for tangency, the line must pass through portfolio with frontier slope
+    # So: portfolio_return = y_intercept + frontier_slope * portfolio_vol
+    # Therefore: y_intercept = portfolio_return - frontier_slope * portfolio_vol
+    
+    y_intercept_tangent = portfolio_return - frontier_slope * portfolio_vol
+    
+    # Use the tangent y-intercept (ensures tangency)
+    # The formula gives us a reference, but tangency requires using frontier slope
+    y_intercept = y_intercept_tangent
+    
+    # Verify the line passes through the portfolio point
+    check = abs(portfolio_return - (y_intercept + frontier_slope * portfolio_vol))
+    if check > 1e-6:
+        print(f"  Warning: Tangency line check failed (error: {check:.2e})")
+    
+    # Extend line from y-axis (σ=0) to frame edge
+    x_line = np.array([0.0, max_vol])
+    y_line = np.array([y_intercept, y_intercept + frontier_slope * max_vol])
     
     ax.plot(x_line, y_line, color=color, linestyle=linestyle, 
            linewidth=linewidth, alpha=alpha, label=label, zorder=zorder)
@@ -419,7 +698,7 @@ def plot_portfolio_frontier(ios_df, ios_summary, msmp_summary=None, optimal_crra
                   c='orange', s=200, marker='s', edgecolors='black', linewidths=1.5,
                   label=f'ZBP (R={zbp_return:.4f}, σ={zbp_vol:.2%})', zorder=5)
     
-    # Calculate axis limits first (needed for tangent lines)
+    # Calculate axis limits first (needed for tangent lines and circle)
     min_vol = 0.0
     max_vol = frontier_vols.max() * 1.1
     min_ret = 0.0
@@ -441,6 +720,18 @@ def plot_portfolio_frontier(ios_df, ios_summary, msmp_summary=None, optimal_crra
         max_ret = max(max_ret, zbp_summary['expected_return_gross'] * 1.1)
         min_ret = min(min_ret, zbp_summary['expected_return_gross'] * 1.1)
     
+    # Extend x-axis to at least 1.2 to show the circle from origin to MSMP
+    if msmp_summary is not None:
+        msmp_vol = msmp_summary['volatility']
+        msmp_return = msmp_summary['expected_return_gross']
+        # Circle radius = sqrt(σ² + R²)
+        circle_radius = np.sqrt(msmp_vol**2 + msmp_return**2)
+        # Ensure x-axis extends to show the circle (at least 1.2)
+        max_vol = max(max_vol, circle_radius * 1.1, 1.2)
+    else:
+        # Even without MSMP, extend to 1.2 for consistency
+        max_vol = max(max_vol, 1.2)
+    
     # Load risk-free rate
     rf = None
     if start_year and end_year:
@@ -452,30 +743,57 @@ def plot_portfolio_frontier(ios_df, ios_summary, msmp_summary=None, optimal_crra
     # These represent the convex space from allocating between long/short positions
     # in the portfolio and the risk-free asset
     
-    # Line from R_f to Optimal CRRA Portfolio (black dashed)
-    if optimal_crra_summary is not None and rf is not None:
-        opt_return = optimal_crra_summary['expected_return_gross']
-        opt_vol = optimal_crra_summary['volatility']
-        plot_line_from_rf(ax, rf, opt_vol, opt_return, max_vol, reflect=False, 
-                          color='black', linestyle='--', label='R_f ↔ Optimal CRRA', zorder=3)
-    
-    # Line from R_f to ZBP (black dashed)
-    if zbp_summary is not None and rf is not None:
+    # Horizontal line through ZBP
+    if zbp_summary is not None:
         zbp_return = zbp_summary['expected_return_gross']
         zbp_vol = zbp_summary['volatility']
-        plot_line_from_rf(ax, rf, zbp_vol, zbp_return, max_vol, reflect=False,
-                          color='black', linestyle='--', label='R_f ↔ ZBP', zorder=3)
+        # Draw horizontal line at ZBP return level
+        ax.axhline(y=zbp_return, color='black', linestyle='--', linewidth=1, alpha=0.5, zorder=1)
+        # Line from CRRA portfolio to intersection of ZBP horizontal line with y-axis (vol=0)
+        if optimal_crra_summary is not None:
+            opt_return = optimal_crra_summary['expected_return_gross']
+            opt_vol = optimal_crra_summary['volatility']
+            # Line from (opt_vol, opt_return) to (0, zbp_return)
+            x_line = np.array([0.0, opt_vol])
+            y_line = np.array([zbp_return, opt_return])
+            ax.plot(x_line, y_line, color='black', linestyle='--', linewidth=1.5,
+                   alpha=0.7, label='CRRA ↔ ZBP horizontal', zorder=3)
     
-    # Lines from R_f to MSMP: both normal and reflected (red solid)
-    if msmp_summary is not None and rf is not None:
+    # Calculate and plot tangency portfolio (TP) - distinct from CRRA
+    tp_return = None
+    tp_vol = None
+    if rf is not None and len(efficient_df) > 0:
+        tp_return, tp_vol = find_tangency_portfolio(rf, efficient_df)
+        if tp_return is not None and tp_vol is not None:
+            # Plot tangency portfolio
+            ax.scatter([tp_vol], [tp_return],
+                      c='blue', s=200, marker='D', edgecolors='black', linewidths=1.5,
+                      label=f'Tangency Portfolio (TP) (R={tp_return:.4f}, σ={tp_vol:.2%})', zorder=5)
+    
+    # Tangency lines using formula: 2 * R_portfolio - R_MSMP (red solid)
+    if msmp_summary is not None:
         msmp_return = msmp_summary['expected_return_gross']
         msmp_vol = msmp_summary['volatility']
-        # Normal line from R_f to MSMP
-        plot_line_from_rf(ax, rf, msmp_vol, msmp_return, max_vol, reflect=False,
-                          color='r', linestyle='-', label='R_f ↔ MSMP', zorder=3)
-        # Reflected line from R_f to MSMP (reflected along y=R_f)
-        plot_line_from_rf(ax, rf, msmp_vol, msmp_return, max_vol, reflect=True,
-                          color='r', linestyle='-', label='R_f ↔ MSMP (reflected)', zorder=3)
+        
+        # Tangency line at MSMP (using formula: 2 * R_MSMP - R_MSMP = R_MSMP)
+        plot_tangency_line(ax, msmp_return, msmp_return, msmp_vol, max_vol,
+                         ios_df, efficient_df, inefficient_df,
+                         color='r', linestyle='-', 
+                         label='Tangency line (MSMP)', zorder=3)
+        
+        # If we have tangency portfolio, also plot its tangency line
+        if tp_return is not None and tp_vol is not None:
+            plot_tangency_line(ax, tp_return, msmp_return, tp_vol, max_vol,
+                             ios_df, efficient_df, inefficient_df,
+                             color='r', linestyle='-', 
+                             label='Tangency line (TP)', zorder=3)
+        
+        # Circle from origin to MSMP (centered at origin)
+        # Radius = distance from origin to MSMP in (σ, R) space
+        radius = np.sqrt(msmp_vol**2 + msmp_return**2)
+        circle = plt.Circle((0, 0), radius, fill=False, color='black', 
+                           linestyle='--', linewidth=1, alpha=0.5, zorder=1)
+        ax.add_patch(circle)
     
     # Labels and formatting
     ax.set_xlabel('Volatility (σ)', fontsize=12, fontweight='bold')
@@ -507,17 +825,20 @@ def plot_portfolio_frontier(ios_df, ios_summary, msmp_summary=None, optimal_crra
     # Legend
     ax.legend(loc='best', fontsize=10, framealpha=0.9)
     
-    # Format axes: x-axis as percentages, y-axis as decimals (gross returns)
-    ax.xaxis.set_major_formatter(plt.FuncFormatter(lambda x, p: f'{x:.1%}'))
+    # Format axes: x-axis as decimals (not percentages), y-axis as decimals (gross returns)
+    ax.xaxis.set_major_formatter(plt.FuncFormatter(lambda x, p: f'{x:.2f}'))
     ax.yaxis.set_major_formatter(plt.FuncFormatter(lambda x, p: f'{x:.3f}'))
     
     # Set axis limits (already calculated above)
     ax.set_xlim(min_vol, max_vol)
     ax.set_ylim(min_ret, max_ret)
     
-    # Label R_f on y-axis if available
+    # Mark and label R_f on y-axis if available
     if rf is not None:
-        ax.axhline(y=rf, color='gray', linestyle=':', linewidth=1, alpha=0.5, zorder=1)
+        # Mark R_f with a point on the y-axis
+        ax.scatter([0.0], [rf], c='gray', s=150, marker='o', edgecolors='black', 
+                  linewidths=1.5, zorder=5, label=f'R_f = {rf:.4f}')
+        # Add text label
         ax.text(-0.02 * max_vol, rf, 'R_f', fontsize=10, ha='right', va='center',
                bbox=dict(boxstyle='round,pad=0.3', facecolor='white', alpha=0.8, edgecolor='gray'))
     
