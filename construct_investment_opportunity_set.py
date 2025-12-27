@@ -157,10 +157,10 @@ def construct_investment_opportunity_set(mu, Sigma, num_portfolios=200, allow_sh
     # For the inefficient limb, we need to extend below MVP
     # The inefficient limb has higher volatility for the same or lower return
     # We'll search from well below MVP return to capture the full U-shape
-    # Extend below MVP by a reasonable amount (e.g., 100% of the range from MVP to min)
-    # This ensures we search far enough below MVP to see the inefficient limb extend
-    range_below_mvp = mu_mvp - mu_min
-    search_min = mu_min - range_below_mvp  # Extend 100% below minimum asset return (further than before)
+    # Note: mu_mvp is typically less than mu_min (MVP has lower return than some assets)
+    # We want to search BELOW MVP, so extend below mu_mvp
+    range_below_mvp = abs(mu_mvp - mu_min)  # Distance between MVP and min asset return
+    search_min = mu_mvp - range_below_mvp * 1.5  # Extend 1.5x the range below MVP
     
     # Generate target returns covering both limbs
     # Inefficient limb: from search_min to MVP (below MVP)
