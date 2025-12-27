@@ -333,18 +333,44 @@ def plot_investment_opportunity_set(frontier, mu, Sigma, portfolio_names,
     figsize : tuple
         Figure size
     """
-    # Sort frontier by volatility for proper plotting (U-shape)
-    sort_idx = np.argsort(frontier['volatilities'])
-    frontier_vols_sorted = frontier['volatilities'][sort_idx]
-    frontier_returns_sorted = frontier['returns'][sort_idx]
-    
     # Convert gross returns to net returns for display
-    frontier_returns_net = frontier_returns_sorted - 1
+    frontier_returns_net = frontier['returns'] - 1
+    frontier_vols = frontier['volatilities']
     
-    # Find MVP
-    mvp_idx = np.argmin(frontier_vols_sorted)
+    # Find MVP (minimum volatility point)
+    mvp_idx = np.argmin(frontier_vols)
     mvp_return_net = frontier_returns_net[mvp_idx]
-    mvp_vol = frontier_vols_sorted[mvp_idx]
+    mvp_vol = frontier_vols[mvp_idx]
+    
+    # Separate efficient and inefficient limbs
+    # Inefficient limb: return < MVP return AND volatility > MVP volatility
+    # Efficient limb: return >= MVP return OR volatility <= MVP volatility (but not both <)
+    inefficient_mask = (frontier_returns_net < mvp_return_net) & (frontier_vols > mvp_vol)
+    efficient_mask = ~inefficient_mask
+    
+    # Sort each limb separately for proper plotting
+    # Inefficient limb: sort by volatility (ascending) to get the U-shape
+    inefficient_vols = frontier_vols[inefficient_mask]
+    inefficient_returns = frontier_returns_net[inefficient_mask]
+    if len(inefficient_vols) > 0:
+        inefficient_sort = np.argsort(inefficient_vols)
+        inefficient_vols_sorted = inefficient_vols[inefficient_sort]
+        inefficient_returns_sorted = inefficient_returns[inefficient_sort]
+    else:
+        inefficient_vols_sorted = np.array([])
+        inefficient_returns_sorted = np.array([])
+    
+    # Efficient limb: sort by volatility (ascending)
+    efficient_vols = frontier_vols[efficient_mask]
+    efficient_returns = frontier_returns_net[efficient_mask]
+    efficient_sort = np.argsort(efficient_vols)
+    efficient_vols_sorted = efficient_vols[efficient_sort]
+    efficient_returns_sorted = efficient_returns[efficient_sort]
+    
+    # Combine: inefficient limb first, then MVP, then efficient limb
+    # This creates the full U-shape
+    frontier_vols_sorted = np.concatenate([inefficient_vols_sorted, [mvp_vol], efficient_vols_sorted])
+    frontier_returns_net_sorted = np.concatenate([inefficient_returns_sorted, [mvp_return_net], efficient_returns_sorted])
     
     # Individual asset returns and volatilities
     if show_individual_assets:
