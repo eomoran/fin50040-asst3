@@ -404,7 +404,7 @@ def main():
     )
     parser.add_argument(
         '--on-frontier', action='store_true',
-        help='Constrain ZBP to be on the efficient frontier (default: False, just on IOS)'
+        help='Constrain ZBP to be on the frontier (hyperbola boundary). Default: True when using optimization, False when using --closed-form'
     )
     parser.add_argument(
         '--closed-form', action='store_true',
@@ -429,15 +429,16 @@ def main():
     print(f"Optimal portfolio RRA: {args.rra}")
     
     allow_short = not args.no_short_selling
-    # Default: on_frontier = False (IOS only, not on frontier)
-    # Use --on-frontier flag to constrain to frontier
+    # When using optimization (non-closed-form), default to on_frontier=True
+    # to ensure ZBP is on the frontier (hyperbola boundary)
     # If --closed-form is set, force on_frontier=False and use closed-form formula
     if args.closed_form:
         on_frontier = False
         print(f"Short selling: {'ALLOWED (free portfolio)' if allow_short else 'NOT ALLOWED (long-only)'}")
         print(f"Closed-form: YES (using analytical formula, on_frontier=False)")
     else:
-        on_frontier = args.on_frontier
+        # Default to on_frontier=True when using optimization to ensure ZBP is on frontier
+        on_frontier = args.on_frontier if args.on_frontier else True
         print(f"Short selling: {'ALLOWED (free portfolio)' if allow_short else 'NOT ALLOWED (long-only)'}")
         print(f"On frontier: {'YES' if on_frontier else 'NO (on IOS only)'}")
     print()

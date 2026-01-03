@@ -13,6 +13,7 @@ import argparse
 import matplotlib.pyplot as plt
 
 # Directories
+DATA_DIR = Path("data/processed")
 RESULTS_DIR = Path("results")
 PLOTS_DIR = Path("plots")
 PLOTS_DIR.mkdir(exist_ok=True)
@@ -215,6 +216,283 @@ def load_zbp_data(portfolio_type, start_year, end_year, rra=4.0, allow_short_sel
         return None
     
     return summary_df[mask].iloc[0]
+
+
+def load_portfolio_weights(portfolio_type, start_year, end_year, weights_file):
+    """
+    Load portfolio weights from CSV file
+    
+    Parameters:
+    -----------
+    portfolio_type : str
+        'size' or 'value'
+    start_year : int
+        Start year
+    end_year : int
+        End year
+    weights_file : str
+        Name of weights CSV file (e.g., 'msmp_weights_size_1927_2013.csv')
+    
+    Returns:
+    --------
+    weights : np.array
+        Portfolio weights
+    portfolio_names : list
+        Portfolio names
+    """
+    weights_path = RESULTS_DIR / weights_file
+    if not weights_path.exists():
+        return None, None
+    
+    weights_df = pd.read_csv(weights_path)
+    weights = weights_df['weight'].values
+    portfolio_names = weights_df['portfolio'].tolist()
+    
+    return weights, portfolio_names
+
+
+def compute_portfolio_return_series(returns, weights, portfolio_names):
+    """
+    Compute return series for a portfolio given weights
+    
+    Parameters:
+    -----------
+    returns : pd.DataFrame
+        Portfolio returns (gross returns R = 1 + r)
+        Index: dates, Columns: portfolio names
+    weights : np.array
+        Portfolio weights
+    portfolio_names : list
+        Portfolio names matching weights
+    
+    Returns:
+    --------
+    portfolio_returns : pd.Series
+        Portfolio return series
+    """
+    # Align portfolio names
+    available_names = [name for name in portfolio_names if name in returns.columns]
+    if len(available_names) != len(portfolio_names):
+        print(f"  Warning: {len(portfolio_names) - len(available_names)} portfolios not found in returns")
+    
+    # Get weights for available portfolios
+    weight_dict = dict(zip(portfolio_names, weights))
+    available_weights = np.array([weight_dict[name] for name in available_names])
+    
+    # Normalize weights to sum to 1
+    if abs(available_weights.sum() - 1.0) > 1e-6:
+        available_weights = available_weights / available_weights.sum()
+    
+    # Compute portfolio returns
+    portfolio_returns = (returns[available_names] @ available_weights)
+    
+    return portfolio_returns
+
+
+def compute_portfolio_correlation(returns1, returns2):
+    """
+    Compute correlation between two portfolio return series
+    
+    Parameters:
+    -----------
+    returns1 : pd.Series
+        First portfolio return series
+    returns2 : pd.Series
+        Second portfolio return series
+    
+    Returns:
+    --------
+    correlation : float
+        Correlation coefficient
+    """
+    # Align indices
+    common_dates = returns1.index.intersection(returns2.index)
+    if len(common_dates) == 0:
+        return 0.0
+    
+    r1 = returns1.loc[common_dates]
+    r2 = returns2.loc[common_dates]
+    
+    correlation = r1.corr(r2)
+    
+    return correlation if not np.isnan(correlation) else 0.0
+
+
+def plot_anchored_lines(ax, anchor_return, portfolio_vol, portfolio_return, max_vol, 
+                       color='blue', label=None, zorder=2, alpha_upper=2.0, plot_upper=True):
+    """
+    Plot lines anchored at (0, anchor_return) representing linear combinations.
+    
+    For a zero-volatility anchor point and a risky portfolio, plots:
+    - Lower line: from (0, anchor_return) through (portfolio_vol, portfolio_return) - represents α ≤ 1
+    - Upper line (if plot_upper=True): from (0, anchor_return) through a point where α = alpha_upper - represents α > 1
+    
+    Parameters:
+    -----------
+    ax : matplotlib.axes.Axes
+        Axes to plot on
+    anchor_return : float
+        Return at zero volatility (y-intercept)
+    portfolio_vol : float
+        Volatility of the portfolio
+    portfolio_return : float
+        Return of the portfolio
+    max_vol : float
+        Maximum volatility to extend lines to
+    color : str
+        Color for both lines
+    label : str
+        Single label for legend (applied to first line only)
+    zorder : int
+        Z-order for plotting
+    alpha_upper : float
+        Alpha value for upper line (default 2.0)
+    plot_upper : bool
+        Whether to plot the upper line (default True)
+    
+    Returns:
+    --------
+    line_vols : np.array
+        Combined volatilities along both lines (for intersection finding)
+    line_returns : np.array
+        Combined returns along both lines
+    """
+    # Lower line: from (0, anchor_return) through (portfolio_vol, portfolio_return)
+    # This represents α ≤ 1: R = α*anchor + (1-α)*portfolio
+    # At α = 0: R = portfolio_return, σ = portfolio_vol
+    if portfolio_vol > 1e-10:
+        slope_lower = (portfolio_return - anchor_return) / portfolio_vol
+    else:
+        slope_lower = 0
+    
+    # Upper line: from (0, anchor_return) through point where α = alpha_upper
+    # For α = alpha_upper: R = alpha_upper*anchor + (1-alpha_upper)*portfolio
+    #                     = alpha_upper*anchor - (alpha_upper-1)*portfolio
+    #                     = 2*anchor - portfolio (for alpha_upper=2)
+    # Volatility: σ = |1-alpha_upper| * portfolio_vol = (alpha_upper-1) * portfolio_vol
+    upper_return = alpha_upper * anchor_return + (1 - alpha_upper) * portfolio_return
+    upper_vol = abs(1 - alpha_upper) * portfolio_vol
+    
+    if upper_vol > 1e-10:
+        slope_upper = (upper_return - anchor_return) / upper_vol
+    else:
+        slope_upper = 0
+    
+    # Plot lower line: from (0, anchor_return) to max_vol
+    x_lower = np.array([0.0, max_vol])
+    y_lower = np.array([anchor_return, anchor_return + slope_lower * max_vol])
+    ax.plot(x_lower, y_lower, color=color, linestyle='-', linewidth=1.5, 
+           alpha=0.7, zorder=zorder, label=label)
+    
+    # Plot upper line: from (0, anchor_return) to max_vol (if requested)
+    if plot_upper:
+        x_upper = np.array([0.0, max_vol])
+        y_upper = np.array([anchor_return, anchor_return + slope_upper * max_vol])
+        ax.plot(x_upper, y_upper, color=color, linestyle='-', linewidth=1.5, 
+               alpha=0.7, zorder=zorder)  # No label - single label for both lines
+    
+    # Return combined points for intersection finding
+    # Generate points along both lines
+    vol_vals = np.linspace(0, max_vol, 500)
+    return_vals_lower = anchor_return + slope_lower * vol_vals
+    if plot_upper:
+        return_vals_upper = anchor_return + slope_upper * vol_vals
+        # Combine and return (for intersection finding)
+        line_vols = np.concatenate([vol_vals, vol_vals])
+        line_returns = np.concatenate([return_vals_lower, return_vals_upper])
+    else:
+        # Only lower line
+        line_vols = vol_vals
+        line_returns = return_vals_lower
+    
+    return line_vols, line_returns
+
+
+def find_line_ios_intersections(line_vols, line_returns, ios_vols, ios_returns, tolerance=0.01):
+    """
+    Find intersections between a line and the IOS frontier
+    
+    Parameters:
+    -----------
+    line_vols : np.array
+        Volatilities along the line
+    line_returns : np.array
+        Returns along the line
+    ios_vols : np.array
+        Volatilities of IOS frontier points
+    ios_returns : np.array
+        Returns of IOS frontier points
+    tolerance : float
+        Tolerance for matching points (Euclidean distance)
+    
+    Returns:
+    --------
+    intersection_vols : np.array
+        Volatilities of intersection points
+    intersection_returns : np.array
+        Returns of intersection points
+    """
+    if len(line_vols) < 2 or len(ios_vols) == 0:
+        return np.array([]), np.array([])
+    
+    intersections_vols = []
+    intersections_returns = []
+    
+    # For each segment of the IOS, check if it intersects with the line
+    # The line is defined by line_vols and line_returns
+    # We'll check if any IOS point is very close to the line
+    
+    # Interpolate the line to get more points for comparison
+    line_vol_min = line_vols.min()
+    line_vol_max = line_vols.max()
+    
+    # For each IOS point, find the closest point on the line
+    for ios_vol, ios_return in zip(ios_vols, ios_returns):
+        # Only check if IOS point is within the line's volatility range
+        if line_vol_min <= ios_vol <= line_vol_max:
+            # Find closest point on line by interpolation
+            # Line equation: R = R1 + (R2 - R1) * (σ - σ1) / (σ2 - σ1)
+            if len(line_vols) >= 2:
+                # Use first and last points to define line
+                vol1, ret1 = line_vols[0], line_returns[0]
+                vol2, ret2 = line_vols[-1], line_returns[-1]
+                
+                if abs(vol2 - vol1) > 1e-10:
+                    slope = (ret2 - ret1) / (vol2 - vol1)
+                    line_return_at_ios_vol = ret1 + slope * (ios_vol - vol1)
+                    
+                    # Check distance from IOS point to line
+                    dist = abs(ios_return - line_return_at_ios_vol)
+                    
+                    # Only mark as intersection if very close
+                    if dist < tolerance:
+                        intersections_vols.append(ios_vol)
+                        intersections_returns.append(ios_return)
+    
+    # Remove duplicates
+    if len(intersections_vols) > 0:
+        intersections_vols = np.array(intersections_vols)
+        intersections_returns = np.array(intersections_returns)
+        
+        # Sort and remove points that are too close together
+        if len(intersections_vols) > 1:
+            sort_idx = np.argsort(intersections_vols)
+            intersections_vols = intersections_vols[sort_idx]
+            intersections_returns = intersections_returns[sort_idx]
+            
+            # Keep only points that are sufficiently separated
+            keep = [True]
+            for i in range(1, len(intersections_vols)):
+                dist = np.sqrt((intersections_vols[i] - intersections_vols[i-1])**2 + 
+                             (intersections_returns[i] - intersections_returns[i-1])**2)
+                if dist > tolerance * 3:  # Require more separation
+                    keep.append(True)
+                else:
+                    keep.append(False)
+            intersections_vols = intersections_vols[keep]
+            intersections_returns = intersections_returns[keep]
+    
+    return np.array(intersections_vols), np.array(intersections_returns)
 
 
 def load_risk_free_rate(start_year, end_year):
@@ -640,7 +918,7 @@ def plot_tangency_line(ax, portfolio_return, msmp_return, portfolio_vol, max_vol
 
 def plot_portfolio_frontier(ios_df, ios_summary, msmp_summary=None, optimal_crra_summary=None,
                       zbp_summary=None, portfolio_type=None, start_year=None, end_year=None,
-                      closed_form=False, figsize=(12, 8)):
+                      closed_form=False, plot_alt_cones=False, figsize=(12, 8)):
     """
     Plot Investment Opportunity Set curve with key portfolios and tangent lines
     
@@ -662,6 +940,10 @@ def plot_portfolio_frontier(ios_df, ios_summary, msmp_summary=None, optimal_crra
         Start year for title
     end_year : int
         End year for title
+    closed_form : bool
+        Whether closed-form solutions were used
+    plot_alt_cones : bool
+        Whether to plot alternative comparison cones (cyan and orange lines)
     figsize : tuple
         Figure size
     """
@@ -685,40 +967,72 @@ def plot_portfolio_frontier(ios_df, ios_summary, msmp_summary=None, optimal_crra
     
     # Combine: inefficient -> MVP -> efficient
     # This creates the full U-shape with smooth connections
-    if len(inefficient_df) > 0:
-        # Ensure smooth connection: inefficient limb should end close to MVP
-        # The last inefficient point should have volatility just above MVP
-        # We'll include MVP in the concatenation to ensure smooth connection
-        frontier_vols = np.concatenate([
-            inefficient_df['volatility'].values,
-            [mvp_vol],
-            efficient_df['volatility'].values
-        ])
-        frontier_returns = np.concatenate([
-            inefficient_df['return_gross'].values,
-            [mvp_return],
-            efficient_df['return_gross'].values
-        ])
-        print(f"  Plotting IOS: {len(inefficient_df)} inefficient + 1 MVP + {len(efficient_df)} efficient = {len(frontier_vols)} total points")
-        print(f"  Inefficient limb: vol range [{inefficient_df['volatility'].min():.4f}, {inefficient_df['volatility'].max():.4f}], return range [{inefficient_df['return_gross'].min():.4f}, {inefficient_df['return_gross'].max():.4f}]")
-    else:
-        # If no inefficient limb found, just plot efficient limb with MVP
-        print(f"  Warning: No inefficient limb found! Only plotting efficient limb.")
-        frontier_vols = np.concatenate([
-            [mvp_vol],
-            efficient_df['volatility'].values
-        ])
-        frontier_returns = np.concatenate([
-            [mvp_return],
-            efficient_df['return_gross'].values
-        ])
-    
     # Create figure
     fig, ax = plt.subplots(figsize=figsize)
     
-    # Plot IOS curve (gross returns)
-    ax.plot(frontier_vols, frontier_returns,
+    # Plot IOS curve (gross returns) - plot as outline only to avoid filled appearance
+    # Plot inefficient limb (from high vol to MVP)
+    if len(inefficient_df) > 0:
+        # Inefficient limb: sort by volatility descending (high to low, ending near MVP)
+        inefficient_vols = inefficient_df['volatility'].values.copy()
+        inefficient_returns = inefficient_df['return_gross'].values.copy()
+        # Sort descending by volatility
+        sort_idx = np.argsort(inefficient_vols)[::-1]
+        inefficient_vols = inefficient_vols[sort_idx]
+        inefficient_returns = inefficient_returns[sort_idx]
+        
+        # Plot inefficient limb
+        ax.plot(inefficient_vols, inefficient_returns,
+                'b-', linewidth=2, alpha=0.7, zorder=2)
+        
+        # Connect to MVP
+        ax.plot([inefficient_vols[-1], mvp_vol], [inefficient_returns[-1], mvp_return],
+                'b-', linewidth=2, alpha=0.7, zorder=2)
+        
+        print(f"  Plotting IOS: {len(inefficient_df)} inefficient + 1 MVP + {len(efficient_df)} efficient")
+        print(f"  Inefficient limb: vol range [{inefficient_df['volatility'].min():.4f}, {inefficient_df['volatility'].max():.4f}], return range [{inefficient_df['return_gross'].min():.4f}, {inefficient_df['return_gross'].max():.4f}]")
+    else:
+        print(f"  Warning: No inefficient limb found! Only plotting efficient limb.")
+    
+    # Plot efficient limb (from MVP to high vol)
+    # Efficient limb: sort by volatility ascending (low to high, starting from MVP)
+    efficient_vols = efficient_df['volatility'].values.copy()
+    efficient_returns = efficient_df['return_gross'].values.copy()
+    # Sort ascending by volatility
+    sort_idx = np.argsort(efficient_vols)
+    efficient_vols = efficient_vols[sort_idx]
+    efficient_returns = efficient_returns[sort_idx]
+    
+    # Connect MVP to efficient limb (if no inefficient limb, start from MVP)
+    if len(inefficient_df) == 0:
+        ax.plot([mvp_vol, efficient_vols[0]], [mvp_return, efficient_returns[0]],
+                'b-', linewidth=2, alpha=0.7, zorder=2)
+    
+    # Plot efficient limb
+    ax.plot(efficient_vols, efficient_returns,
             'b-', linewidth=2, label='Investment Opportunity Set', alpha=0.7, zorder=2)
+    
+    # Create combined arrays for intersection finding (keep original order for compatibility)
+    if len(inefficient_df) > 0:
+        frontier_vols = np.concatenate([
+            inefficient_vols,
+            [mvp_vol],
+            efficient_vols
+        ])
+        frontier_returns = np.concatenate([
+            inefficient_returns,
+            [mvp_return],
+            efficient_returns
+        ])
+    else:
+        frontier_vols = np.concatenate([
+            [mvp_vol],
+            efficient_vols
+        ])
+        frontier_returns = np.concatenate([
+            [mvp_return],
+            efficient_returns
+        ])
     
     # Plot MVP
     ax.scatter([mvp_vol], [mvp_return],
@@ -830,39 +1144,48 @@ def plot_portfolio_frontier(ios_df, ios_summary, msmp_summary=None, optimal_crra
             ax.scatter([tp_vol], [tp_return],
                       c='blue', s=200, marker='D', edgecolors='black', linewidths=1.5,
                       label=f'Tangency Portfolio (TP) (R={tp_return:.4f}, σ={tp_vol:.2%})', zorder=5)
+            
+            # Plot the Capital Market Line (CAL) - the line from R_f through TP
+            # CAL: R = R_f + (R_TP - R_f)/σ_TP * σ
+            if tp_vol > 1e-10:
+                cal_slope = (tp_return - rf) / tp_vol
+            else:
+                cal_slope = 0
+            
+            # Generate CAL from σ=0 to max_vol
+            cal_vols = np.linspace(0, max_vol, 500)
+            cal_returns = rf + cal_slope * cal_vols
+            
+            # Plot CAL
+            ax.plot(cal_vols, cal_returns,
+                   color='purple', linestyle='--', linewidth=2, 
+                   alpha=0.8, zorder=3, label='Capital Market Line (CAL)')
+            
+            print(f"  Capital Market Line (CAL): R = {rf:.4f} + {cal_slope:.4f} * σ")
+            print(f"    CAL passes through TP: ({tp_vol:.4f}, {tp_return:.4f})")
     
     # Red lines: from (0, R_mvp) to TP and from (0, R_mvp) to MSMP
     # These are not asymptotes but lines connecting MVP return on y-axis to key portfolios
+    # Using plot_anchored_lines for consistency (only lower line needed, upper line will be ignored)
     if msmp_summary is not None:
         msmp_return = msmp_summary['expected_return_gross']
         msmp_vol = msmp_summary['volatility']
         
-        # Line from (0, R_mvp) to MSMP
-        # Slope = (msmp_return - mvp_return) / (msmp_vol - 0) = (msmp_return - mvp_return) / msmp_vol
-        if msmp_vol > 1e-10:
-            slope_msmp = (msmp_return - mvp_return) / msmp_vol
-        else:
-            slope_msmp = 0
-        
-        # Plot line from y-axis (σ=0) at R_mvp to frame edge
-        x_line = np.array([0.0, max_vol])
-        y_line = np.array([mvp_return, mvp_return + slope_msmp * max_vol])
-        ax.plot(x_line, y_line, color='r', linestyle='-', linewidth=1.5, alpha=0.7,
-               label='R_MVP → MSMP', zorder=3)
+        # Use plot_anchored_lines (only lower line is relevant here)
+        line_vols, line_returns = plot_anchored_lines(
+            ax, anchor_return=mvp_return, portfolio_vol=msmp_vol,
+            portfolio_return=msmp_return, max_vol=max_vol,
+            color='r', label='R_MVP → MSMP', zorder=3, alpha_upper=2.0, plot_upper=False
+        )
     
     # Line from (0, R_mvp) to Tangency Portfolio (TP)
     if tp_return is not None and tp_vol is not None:
-        # Slope = (tp_return - mvp_return) / (tp_vol - 0) = (tp_return - mvp_return) / tp_vol
-        if tp_vol > 1e-10:
-            slope_tp = (tp_return - mvp_return) / tp_vol
-        else:
-            slope_tp = 0
-        
-        # Plot line from y-axis (σ=0) at R_mvp to frame edge
-        x_line = np.array([0.0, max_vol])
-        y_line = np.array([mvp_return, mvp_return + slope_tp * max_vol])
-        ax.plot(x_line, y_line, color='r', linestyle='-', linewidth=1.5, alpha=0.7,
-               label='R_MVP → TP', zorder=3)
+        # Use plot_anchored_lines (only lower line is relevant here)
+        line_vols, line_returns = plot_anchored_lines(
+            ax, anchor_return=mvp_return, portfolio_vol=tp_vol,
+            portfolio_return=tp_return, max_vol=max_vol,
+            color='r', label='R_MVP → TP', zorder=3, alpha_upper=2.0, plot_upper=False
+        )
     
     # Circle from origin to MSMP (centered at origin)
     if msmp_summary is not None:
@@ -875,6 +1198,16 @@ def plot_portfolio_frontier(ios_df, ios_summary, msmp_summary=None, optimal_crra
         circle = plt.Circle((0, 0), radius, fill=False, color='black', 
                            linestyle='--', linewidth=1, alpha=0.5, zorder=1)
         ax.add_patch(circle)
+    
+    # Plot comparison cones (cyan and orange lines) for comparison with red lines
+    # These are separate from the lecturer's red lines (R_MVP → MSMP and R_MVP → TP)
+    if plot_alt_cones and portfolio_type and start_year and end_year:
+        from plot_comparison_cones import plot_comparison_cones
+        plot_comparison_cones(
+            ax, portfolio_type, start_year, end_year,
+            rf, msmp_summary, zbp_summary, tp_return, tp_vol,
+            frontier_vols, frontier_returns, max_vol
+        )
     
     # Labels and formatting
     ax.set_xlabel('Volatility (σ)', fontsize=12, fontweight='bold')
@@ -918,12 +1251,12 @@ def plot_portfolio_frontier(ios_df, ios_summary, msmp_summary=None, optimal_crra
     
     # Mark and label R_f on y-axis if available
     if rf is not None:
-        # Mark R_f with a point on the y-axis
-        ax.scatter([0.0], [rf], c='gray', s=150, marker='o', edgecolors='black', 
+        # Mark R_f with a point on the y-axis (cyan/teal color to match cone)
+        ax.scatter([0.0], [rf], c='cyan', s=150, marker='o', edgecolors='darkcyan', 
                   linewidths=1.5, zorder=5, label=f'R_f = {rf:.4f}')
         # Add text label
         ax.text(-0.02 * max_vol, rf, 'R_f', fontsize=10, ha='right', va='center',
-               bbox=dict(boxstyle='round,pad=0.3', facecolor='white', alpha=0.8, edgecolor='gray'))
+               bbox=dict(boxstyle='round,pad=0.3', facecolor='white', alpha=0.8, edgecolor='cyan'))
     
     plt.tight_layout()
     
@@ -962,6 +1295,10 @@ def main():
     parser.add_argument(
         '--closed-form', action='store_true',
         help='Indicate that closed-form solutions were used (for filename/title)'
+    )
+    parser.add_argument(
+        '--plot-alt-cones', action='store_true',
+        help='Plot alternative comparison cones (cyan R_f↔MSMP and orange R_ZBP↔MSMP lines)'
     )
     
     args = parser.parse_args()
@@ -1030,7 +1367,7 @@ def main():
         ios_df, ios_summary, msmp_summary=msmp_summary, 
         optimal_crra_summary=optimal_crra_summary, zbp_summary=zbp_summary,
         portfolio_type=args.portfolio_type, start_year=args.start_year, end_year=args.end_year,
-        closed_form=args.closed_form
+        closed_form=args.closed_form, plot_alt_cones=args.plot_alt_cones
     )
     
     # Save plot

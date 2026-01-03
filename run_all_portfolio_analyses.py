@@ -115,6 +115,10 @@ def main():
         help='Skip the final plotting step'
     )
     parser.add_argument(
+        '--plot-alt-cones', action='store_true',
+        help='Plot alternative comparison cones (cyan R_f↔MSMP and orange R_ZBP↔MSMP lines)'
+    )
+    parser.add_argument(
         '--all', action='store_true',
         help='Run for all combinations: size/value × 1927-2013/1927-2024'
     )
@@ -152,6 +156,7 @@ def main():
                 skip_plot=args.skip_plot,
                 on_frontier=args.on_frontier,
                 closed_form=args.closed_form,
+                plot_alt_cones=args.plot_alt_cones,
                 all=False
             )
             
@@ -254,6 +259,8 @@ def run_all_steps(args):
         step6_args = common_args.copy() + ['--rra', str(args.rra)]
         if args.closed_form:
             step6_args.append('--closed-form')
+        if args.plot_alt_cones:
+            step6_args.append('--plot-alt-cones')
         if not run_script(SCRIPTS['plot'], step6_args, 6, 6):
             return False
     else:
